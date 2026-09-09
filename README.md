@@ -1,10 +1,10 @@
 # Shopify Freshness Tracker
 
-A small, scoped Shopify app built as a portfolio piece demonstrating custom Shopify app development — Admin UI extensions, token-exchange auth, webhooks, metafields/metaobjects, and order-driven inventory logic (FEFO batch decrement on fulfillment). Not a production product; merchants track per-batch shelf life/expiration on perishable products, with a dashboard overview and automatic FEFO stock decrement on fulfillment.
+A small, scoped Shopify app being built as a portfolio piece to demonstrate custom Shopify app development — Admin UI extensions, token-exchange auth, webhooks, metafields/metaobjects, and order-driven inventory logic (FEFO batch decrement on fulfillment). Not a production product.
 
-- Full spec: [`SPEC.md`](./SPEC.md)
-- Implementation plan: [`tasks/plan.md`](./tasks/plan.md)
-- Task checklist / progress: [`tasks/todo.md`](./tasks/todo.md)
+**Planned functionality** (full design in [`SPEC.md`](./SPEC.md)): merchants track per-batch shelf life/expiration on perishable products via an Admin extension, view a dashboard overview of freshness status across products, and have stock automatically decremented FEFO-style when an order is fulfilled.
+
+**Current status:** early build — only initial setup/scaffolding is complete. See [`tasks/todo.md`](./tasks/todo.md) for live progress and [`tasks/plan.md`](./tasks/plan.md) for the phased build plan.
 
 Scaffolded from Shopify's official React Router app template — the rest of this README is template-level framework/setup documentation, kept as-is for reference.
 
@@ -14,7 +14,7 @@ Scaffolded from Shopify's official React Router app template — the rest of thi
 
 This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/). It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
 
-Rather than cloning this repo, follow the [Quick Start steps](https://github.com/Shopify/shopify-app-template-react-router#quick-start).
+This project has already been scaffolded from that template — the sections below are the template's own framework documentation, kept for reference; commands like `shopify app dev` are exactly what you'd run for this app too.
 
 Visit the [`shopify.dev` documentation](https://shopify.dev/docs/api/shopify-app-react-router) for more details on the React Router app package.
 
@@ -46,7 +46,7 @@ Local development is powered by [the Shopify CLI](https://shopify.dev/docs/apps/
 
 ### Authenticating and querying data
 
-To authenticate and query data you can use the `shopify` const that is exported from `/app/shopify.server.js`:
+To authenticate and query data you can use the `shopify` const that is exported from `/app/shopify.server.ts`:
 
 ```js
 export async function loader({ request }) {
@@ -78,6 +78,8 @@ This template comes pre-configured with examples of:
 2. Querying data using Graphql. Please see: [/app/routes/app.\_index.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/app._index.tsx).
 3. Responding to webhooks. Please see [/app/routes/webhooks.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/webhooks.app.uninstalled.tsx).
 4. Using metafields, metaobjects, and declarative custom data definitions. Please see [/app/routes/app.\_index.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/app._index.tsx) and [shopify.app.toml](https://github.com/Shopify/shopify-app-template-react-router/blob/main/shopify.app.toml).
+
+> **Note for this project:** the demo GraphQL/metafield/metaobject example code above still exists locally in `app/routes/app._index.tsx`, but its demo definitions were already trimmed from this repo's `shopify.app.toml` during setup — "Generate a product" likely errors if clicked as a result (not yet verified live). That whole route gets replaced by the real dashboard in Phase 3 (see `tasks/plan.md`).
 
 Please read the [documentation for @shopify/shopify-app-react-router](https://shopify.dev/docs/api/shopify-app-react-router) to see what other API's are available.
 
@@ -130,6 +132,8 @@ pnpm run build
 ```
 
 ## Hosting
+
+**For this project:** dev-store-only for v1, per `SPEC.md` — no public deploy planned unless a live demo link is later needed for the portfolio. The options below are generic reference, not a current to-do.
 
 When you're ready to set up your app in production, you can follow [our deployment documentation](https://shopify.dev/docs/apps/launch/deployment) to host it externally. From there, you have a few options:
 
