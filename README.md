@@ -1,3 +1,15 @@
+# Shopify Freshness Tracker
+
+A small, scoped Shopify app built as a portfolio piece demonstrating custom Shopify app development — Admin UI extensions, token-exchange auth, webhooks, metafields/metaobjects, and order-driven inventory logic (FEFO batch decrement on fulfillment). Not a production product; merchants track per-batch shelf life/expiration on perishable products, with a dashboard overview and automatic FEFO stock decrement on fulfillment.
+
+- Full spec: [`SPEC.md`](./SPEC.md)
+- Implementation plan: [`tasks/plan.md`](./tasks/plan.md)
+- Task checklist / progress: [`tasks/todo.md`](./tasks/todo.md)
+
+Scaffolded from Shopify's official React Router app template — the rest of this README is template-level framework/setup documentation, kept as-is for reference.
+
+---
+
 # Shopify App Template - React Router
 
 This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/). It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
