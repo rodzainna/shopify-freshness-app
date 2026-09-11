@@ -32,3 +32,9 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+model ProcessedWebhook {
+  id          String   @id
+  topic       String
+  processedAt DateTime @default(now())
+}
