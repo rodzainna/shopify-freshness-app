@@ -1,0 +1,89 @@
+import { describe, it, expect } from "vitest";
+
+import { Batch, getShopToday, computeBatchFreshness, computeAggregateFreshness } from "./freshness";
+
+describe("computeBatchFreshness", () => {
+  const today = "2026-09-12"; // fixed — never derived from new Date()
+
+  it("marks a batch expired when the expiry date has passed", () => {
+    const result = computeBatchFreshness("2025-01-01", today);
+    expect(result).toStrictEqual({ status: "Expired", daysRemaining: -619 });
+  });
+
+  it("marks a batch Fresh at 4 days remaining", () => {
+    const result = computeBatchFreshness("2026-09-16", today);
+    expect(result).toStrictEqual({ status: "Fresh", daysRemaining: 4 });
+  });
+
+  it("marks a batch Use Soon at exactly 3 days remaining (the threshold)", () => {
+    const result = computeBatchFreshness("2026-09-15", today);
+    expect(result).toStrictEqual({ status: "Use Soon", daysRemaining: 3 });
+  });
+
+  it("proves the result isn't cached: same expiration, two different 'today' values give different statuses", () => {
+    const expirationDate = "2026-09-15";
+    const earlier = computeBatchFreshness(expirationDate, "2026-09-10"); // 5 days out
+    const later = computeBatchFreshness(expirationDate, "2026-09-13");   // 2 days out
+    expect(earlier.status).toBe("Fresh");
+    expect(later.status).toBe("Use Soon");
+  });
+});
+
+describe("getShopToday", () => {
+  it("uses the shop's local date across a day boundary, not the UTC date", () => {
+    // 11pm UTC on the 12th is already 7am on the 13th in Manila (UTC+8)
+    const instant = new Date("2026-09-12T23:00:00.000Z");
+    expect(getShopToday("Asia/Manila", instant)).toBe("2026-09-13");
+  });
+
+  it("works the other direction too, for a timezone behind UTC", () => {
+    // 2am UTC on the 12th is still 7pm on the 11th in Los Angeles (UTC-7 in September, daylight saving)
+    const instant = new Date("2026-09-12T02:00:00.000Z");
+    expect(getShopToday("America/Los_Angeles", instant)).toBe("2026-09-11");
+  });
+});
+
+describe("computeAggregateFreshness", () => {
+  const today = "2026-09-12";
+
+  it("shows the worst status among active batches (mixed case)", () => {
+    const batches = [
+      { quantity: 3, expirationDate: "2025-01-01" },  // already expired
+      { quantity: 10, expirationDate: "2030-01-01" }, // way fresh
+    ];
+    const result = computeAggregateFreshness(batches, today);
+    expect(result).toBe("Expired");
+  });
+
+  it("returns 'Not set' when there are no active batches", () => {
+    const batches: Batch[] = [];
+    const result = computeAggregateFreshness(batches, today);
+    expect(result).toBe("Not set");
+  });
+});
+
+describe("parseDateOnly validation (via computeBatchFreshness)", () => {
+  const today = "2026-09-12";
+
+  it("throws on a malformed date shape", () => {
+    expect(() => computeBatchFreshness("not-a-date", today)).toThrow();
+  });
+
+  it("throws on wrong separators", () => {
+    expect(() => computeBatchFreshness("2026/09/15", today)).toThrow();
+  });
+
+  it("throws on a date that doesn't exist, even with the right shape", () => {
+    // February never has 30 days — this is the round-trip check catching
+    // Date.UTC's silent rollover behavior
+    expect(() => computeBatchFreshness("2026-02-30", today)).toThrow();
+  });
+
+  it("throws with a message that actually mentions the bad input", () => {
+    expect(() => computeBatchFreshness("2026-13-01", today)).toThrow("2026-13-01");
+  });
+
+  it("still works correctly for a valid date (no false positives)", () => {
+    expect(() => computeBatchFreshness("2026-09-20", today)).not.toThrow();
+  });
+});
