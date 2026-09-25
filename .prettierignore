@@ -5,3 +5,8 @@ node_modules
 prisma
 public
 .shopify
+.claude
+.react-router
+build
+extensions/*/dist
+extensions/*/shopify.d.ts

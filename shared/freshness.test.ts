@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import { Batch, getShopToday, computeBatchFreshness, computeAggregateFreshness } from "./freshness";
+import {
+  Batch,
+  getShopToday,
+  computeBatchFreshness,
+  computeAggregateFreshness,
+} from "./freshness";
 
 describe("computeBatchFreshness", () => {
   const today = "2026-09-12"; // fixed — never derived from new Date()
@@ -23,7 +28,7 @@ describe("computeBatchFreshness", () => {
   it("proves the result isn't cached: same expiration, two different 'today' values give different statuses", () => {
     const expirationDate = "2026-09-15";
     const earlier = computeBatchFreshness(expirationDate, "2026-09-10"); // 5 days out
-    const later = computeBatchFreshness(expirationDate, "2026-09-13");   // 2 days out
+    const later = computeBatchFreshness(expirationDate, "2026-09-13"); // 2 days out
     expect(earlier.status).toBe("Fresh");
     expect(later.status).toBe("Use Soon");
   });
@@ -48,7 +53,7 @@ describe("computeAggregateFreshness", () => {
 
   it("shows the worst status among active batches (mixed case)", () => {
     const batches = [
-      { quantity: 3, expirationDate: "2025-01-01" },  // already expired
+      { quantity: 3, expirationDate: "2025-01-01" }, // already expired
       { quantity: 10, expirationDate: "2030-01-01" }, // way fresh
     ];
     const result = computeAggregateFreshness(batches, today);
@@ -80,7 +85,9 @@ describe("parseDateOnly validation (via computeBatchFreshness)", () => {
   });
 
   it("throws with a message that actually mentions the bad input", () => {
-    expect(() => computeBatchFreshness("2026-13-01", today)).toThrow("2026-13-01");
+    expect(() => computeBatchFreshness("2026-13-01", today)).toThrow(
+      "2026-13-01",
+    );
   });
 
   it("still works correctly for a valid date (no false positives)", () => {

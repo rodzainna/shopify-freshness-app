@@ -1,7 +1,12 @@
 import "@shopify/ui-extensions/preact";
-import { type BatchFreshness, computeBatchFreshness, getShopToday, type FreshnessStatus } from '../../../shared/freshness';
-import { render } from 'preact';
-import { useState } from 'preact/hooks';
+import {
+  type BatchFreshness,
+  computeBatchFreshness,
+  getShopToday,
+  type FreshnessStatus,
+} from "../../../shared/freshness";
+import { render } from "preact";
+import { useState } from "preact/hooks";
 
 export default async () => {
   const { data } = await shopify.query<{ shop: { ianaTimezone: string } }>(`
@@ -12,8 +17,11 @@ export default async () => {
     }
   `);
 
-  render(<Extension timezone={ data?.shop.ianaTimezone ?? "UTC" } />, document.body);
-}
+  render(
+    <Extension timezone={data?.shop.ianaTimezone ?? "UTC"} />,
+    document.body,
+  );
+};
 
 interface PanelBatch {
   id: string;
@@ -35,11 +43,12 @@ interface PanelBatch {
 //   { id: "3", quantity: 20, restockedOn: "", expirationDate: "2026-10-01" },
 // ];
 
-const STATUS_TONE: Record<FreshnessStatus, "success" | "warning" | "critical"> = {
-  "Fresh": "success",
-  "Use Soon": "warning",
-  "Expired": "critical",
-};
+const STATUS_TONE: Record<FreshnessStatus, "success" | "warning" | "critical"> =
+  {
+    Fresh: "success",
+    "Use Soon": "warning",
+    Expired: "critical",
+  };
 
 // function toPanelBatch(node: FreshnessBatchNode): PanelBatch {
 //   return {
@@ -50,7 +59,10 @@ const STATUS_TONE: Record<FreshnessStatus, "success" | "warning" | "critical"> =
 //   };
 // }
 
-function getFreshness(expirationDate: string, today: string): BatchFreshness | null {
+function getFreshness(
+  expirationDate: string,
+  today: string,
+): BatchFreshness | null {
   if (!expirationDate) return null;
 
   try {
@@ -60,9 +72,8 @@ function getFreshness(expirationDate: string, today: string): BatchFreshness | n
   }
 }
 
-
 function Extension({ timezone }: { timezone: string }) {
-  const {data} = shopify;
+  const { data } = shopify;
   console.log({ data });
   const today = getShopToday(timezone, new Date());
 
@@ -70,7 +81,9 @@ function Extension({ timezone }: { timezone: string }) {
 
   function updateBatch(id: string, changes: Partial<PanelBatch>) {
     setBatches((current) =>
-      current.map((batch) => (batch.id === id ? { ...batch, ...changes } : batch))
+      current.map((batch) =>
+        batch.id === id ? { ...batch, ...changes } : batch,
+      ),
     );
   }
 
@@ -81,7 +94,12 @@ function Extension({ timezone }: { timezone: string }) {
   function addBatch() {
     setBatches((current) => [
       ...current,
-      { id: crypto.randomUUID(), quantity: 0, restockedOn: "", expirationDate: "" },
+      {
+        id: crypto.randomUUID(),
+        quantity: 0,
+        restockedOn: "",
+        expirationDate: "",
+      },
     ]);
   }
 
@@ -97,34 +115,52 @@ function Extension({ timezone }: { timezone: string }) {
                 <s-number-field
                   label="Quantity"
                   value={String(batch.quantity)}
-                  onChange={(event) => updateBatch(batch.id, { quantity: Number(event.currentTarget.value) })}
+                  onChange={(event) =>
+                    updateBatch(batch.id, {
+                      quantity: Number(event.currentTarget.value),
+                    })
+                  }
                 />
                 <s-date-field
                   label="Expiry Date"
                   value={batch.expirationDate}
                   required
-                  onChange={(event) => updateBatch(batch.id, { expirationDate: event.currentTarget.value })}
+                  onChange={(event) =>
+                    updateBatch(batch.id, {
+                      expirationDate: event.currentTarget.value,
+                    })
+                  }
                 />
                 <s-date-field
                   label="Restocked On"
                   value={batch.restockedOn}
-                  onChange={(event) => updateBatch(batch.id, { restockedOn: event.currentTarget.value })}
+                  onChange={(event) =>
+                    updateBatch(batch.id, {
+                      restockedOn: event.currentTarget.value,
+                    })
+                  }
                 />
-                
               </s-grid>
-              <s-grid gridTemplateColumns="repeat(4, 1fr)" gap="base" alignItems="start">
-                <s-button tone="critical" onClick={() => removeBatch(batch.id)}>Remove</s-button>
+              <s-grid
+                gridTemplateColumns="repeat(4, 1fr)"
+                gap="base"
+                alignItems="start"
+              >
+                <s-button tone="critical" onClick={() => removeBatch(batch.id)}>
+                  Remove
+                </s-button>
                 {freshness ? (
-                  <s-badge tone={STATUS_TONE[freshness.status]}>{freshness.status}: {freshness.daysRemaining}</s-badge>
+                  <s-badge tone={STATUS_TONE[freshness.status]}>
+                    {freshness.status}: {freshness.daysRemaining}
+                  </s-badge>
                 ) : (
                   <s-badge tone="info">Enter an expiration date</s-badge>
                 )}
-             </s-grid>
+              </s-grid>
             </s-stack>
           );
         })}
         <s-button onClick={addBatch}>Add batch</s-button>
-        
       </s-stack>
     </s-admin-block>
   );

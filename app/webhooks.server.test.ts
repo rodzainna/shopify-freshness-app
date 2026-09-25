@@ -3,14 +3,14 @@ import db from "./db.server";
 import {
   authenticateWebhookSafely,
   isDuplicateWebhook,
-  markWebhookProcessed
+  markWebhookProcessed,
 } from "./webhooks.server";
 
 vi.mock("./shopify.server", () => ({
   authenticate: {
     webhook: vi.fn(),
-  }
-}))
+  },
+}));
 
 import { authenticate } from "./shopify.server";
 
@@ -23,7 +23,7 @@ describe("webhook dedup", () => {
 
   it("treats a fresh webhook ID as not a duplicate", async () => {
     expect(await isDuplicateWebhook(testWebhookId)).toBe(false);
-  })
+  });
 
   it("treats a previously recorded webhook ID as a d duplicate", async () => {
     await markWebhookProcessed(testWebhookId, "app/uninstalled");
@@ -34,10 +34,14 @@ describe("webhook dedup", () => {
 describe("authenticateWebhookSafely", () => {
   const fakeRequest = new Request("http://localhost/webhooks/app/uninstalled", {
     method: "POST",
-  })
+  });
 
   it("passes through a successful authentication unchanged", async () => {
-    const fakeContext = { shop: "testshop.myshopify.com", topic: "app/unistalled", webhookId: "abc" };
+    const fakeContext = {
+      shop: "testshop.myshopify.com",
+      topic: "app/unistalled",
+      webhookId: "abc",
+    };
     vi.mocked(authenticate.webhook).mockResolvedValueOnce(fakeContext as never);
 
     const result = await authenticateWebhookSafely(fakeRequest);

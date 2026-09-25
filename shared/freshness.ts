@@ -38,7 +38,6 @@ function parseDateOnly(dateString: string): number {
     throw new Error(`"${dateString}" is not a real calendar date`);
   }
 
-
   return utcMs;
 }
 
@@ -57,7 +56,7 @@ export function getShopToday(timezone: string, now: Date): string {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
-    day: "2-digit"
+    day: "2-digit",
   });
 
   return formatter.format(now);
@@ -68,7 +67,10 @@ export function getShopToday(timezone: string, now: Date): string {
  * @param today - the shop-local "today", "YYYY-MM-DD" (see getShopToday)
  * @returns BatchFreshness: status and daysRemaining
  */
-export function computeBatchFreshness(expirationDate: string, today: string): BatchFreshness {
+export function computeBatchFreshness(
+  expirationDate: string,
+  today: string,
+): BatchFreshness {
   const daysRemaining = Math.round(
     (parseDateOnly(expirationDate) - parseDateOnly(today)) / MS_PER_DAY,
   );
@@ -86,7 +88,10 @@ export function computeBatchFreshness(expirationDate: string, today: string): Ba
   return { status, daysRemaining };
 }
 
-export function computeAggregateFreshness(batches: Batch[], today: string): FreshnessStatus | "Not set" {
+export function computeAggregateFreshness(
+  batches: Batch[],
+  today: string,
+): FreshnessStatus | "Not set" {
   const activeBatches = batches.filter((batch) => batch.quantity > 0);
 
   if (activeBatches.length === 0) {
@@ -95,7 +100,7 @@ export function computeAggregateFreshness(batches: Batch[], today: string): Fres
 
   const statuses = activeBatches.map(
     (batch) => computeBatchFreshness(batch.expirationDate, today).status,
-  )
+  );
 
   if (statuses.includes("Expired")) return "Expired";
   if (statuses.includes("Use Soon")) return "Use Soon";

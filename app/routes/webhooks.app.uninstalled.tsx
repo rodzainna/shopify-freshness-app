@@ -3,14 +3,17 @@ import db from "../db.server";
 import {
   authenticateWebhookSafely,
   isDuplicateWebhook,
-  markWebhookProcessed
+  markWebhookProcessed,
 } from "../webhooks.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, session, topic, webhookId } = await authenticateWebhookSafely(request);
+  const { shop, session, topic, webhookId } =
+    await authenticateWebhookSafely(request);
 
   if (await isDuplicateWebhook(webhookId)) {
-    console.log(`Duplicate ${topic} webhook ${webhookId} for ${shop}, skipping`);
+    console.log(
+      `Duplicate ${topic} webhook ${webhookId} for ${shop}, skipping`,
+    );
     return new Response();
   }
 
