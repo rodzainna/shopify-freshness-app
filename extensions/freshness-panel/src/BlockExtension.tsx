@@ -1,11 +1,12 @@
 import "@shopify/ui-extensions/preact";
 import {
   type BatchFreshness,
+  formatDaysRemaining,
   computeBatchFreshness,
   getShopToday,
   type FreshnessStatus,
 } from "../../../shared/freshness";
-import { render } from "preact";
+import { Fragment, render } from "preact";
 import { useState } from "preact/hooks";
 
 export default async () => {
@@ -26,22 +27,25 @@ export default async () => {
 interface PanelBatch {
   id: string;
   quantity: number;
-  restockedOn: string;
   expirationDate: string;
 }
 
 // interface FreshnessBatchNode {
 //   id: string;
 //   quantity: { value: string } | null;
-//   restockedOn: { value: string } | null;
 //   expirationDate: { value: string } | null;
 // }
 
 // const MOCK_BATCHES: PanelBatch[] = [
-//   { id: "1", quantity: 12, restockedOn: "2026-09-10", expirationDate: "2026-09-14" },
-//   { id: "2", quantity: 5, restockedOn: "2026-09-01", expirationDate: "2026-09-08" },
-//   { id: "3", quantity: 20, restockedOn: "", expirationDate: "2026-10-01" },
+//   { id: "1", quantity: 12, expirationDate: "2026-09-14" },
+//   { id: "2", quantity: 5, expirationDate: "2026-09-08" },
+//   { id: "3", quantity: 20, expirationDate: "2026-10-01" },
 // ];
+
+// s-date-field has a built-in 224px (14rem) min width, so on narrow blocks the
+// status badge gets whatever is left and truncates. Accepted trade-off.
+const ROW_COLUMNS =
+  "@container (inline-size > 600px) 10rem 14rem 1fr auto, 5rem 14rem 1fr auto";
 
 const STATUS_TONE: Record<FreshnessStatus, "success" | "warning" | "critical"> =
   {
@@ -54,7 +58,6 @@ const STATUS_TONE: Record<FreshnessStatus, "success" | "warning" | "critical"> =
 //   return {
 //     id: node.id,
 //     quantity: Number(node.quantity?.value ?? 0),
-//     restockedOn: node.restockedOn?.value ?? "",
 //     expirationDate: node.expirationDate?.value ?? ""
 //   };
 // }
@@ -97,70 +100,78 @@ function Extension({ timezone }: { timezone: string }) {
       {
         id: crypto.randomUUID(),
         quantity: 0,
-        restockedOn: "",
         expirationDate: "",
       },
     ]);
   }
 
   return (
-    <s-admin-block heading="Freshness batches">
+    <s-admin-block
+      heading="Freshness batches"
+      collapsedSummary={`${batches.length} ${batches.length === 1 ? "batch" : "batches"}`}
+    >
       <s-stack direction="block" gap="base">
-        {batches.map((batch) => {
-          const freshness = getFreshness(batch.expirationDate, today);
+        {batches.length > 0 && (
+          <s-query-container>
+            <s-grid
+              gridTemplateColumns={ROW_COLUMNS}
+              columnGap="base"
+              rowGap="small-200"
+              alignItems="center"
+            >
+              <s-text>Quantity</s-text>
+              <s-text>Expiry Date *</s-text>
+              <s-text>Status</s-text>
+              <s-text />
+              {batches.map((batch) => {
+                const freshness = getFreshness(batch.expirationDate, today);
 
-          return (
-            <s-stack key={batch.id} direction="block" gap="base">
-              <s-grid gridTemplateColumns="repeat(3, 1fr)" gap="base">
-                <s-number-field
-                  label="Quantity"
-                  value={String(batch.quantity)}
-                  onChange={(event) =>
-                    updateBatch(batch.id, {
-                      quantity: Number(event.currentTarget.value),
-                    })
-                  }
-                />
-                <s-date-field
-                  label="Expiry Date"
-                  value={batch.expirationDate}
-                  required
-                  onChange={(event) =>
-                    updateBatch(batch.id, {
-                      expirationDate: event.currentTarget.value,
-                    })
-                  }
-                />
-                <s-date-field
-                  label="Restocked On"
-                  value={batch.restockedOn}
-                  onChange={(event) =>
-                    updateBatch(batch.id, {
-                      restockedOn: event.currentTarget.value,
-                    })
-                  }
-                />
-              </s-grid>
-              <s-grid
-                gridTemplateColumns="repeat(4, 1fr)"
-                gap="base"
-                alignItems="start"
-              >
-                <s-button tone="critical" onClick={() => removeBatch(batch.id)}>
-                  Remove
-                </s-button>
-                {freshness ? (
-                  <s-badge tone={STATUS_TONE[freshness.status]}>
-                    {freshness.status}: {freshness.daysRemaining}
-                  </s-badge>
-                ) : (
-                  <s-badge tone="info">Enter an expiration date</s-badge>
-                )}
-              </s-grid>
-            </s-stack>
-          );
-        })}
-        <s-button onClick={addBatch}>Add batch</s-button>
+                return (
+                  <Fragment key={batch.id}>
+                    <s-number-field
+                      label="Quantity"
+                      labelAccessibilityVisibility="exclusive"
+                      value={String(batch.quantity)}
+                      onChange={(event) =>
+                        updateBatch(batch.id, {
+                          quantity: Number(event.currentTarget.value),
+                        })
+                      }
+                    />
+                    <s-date-field
+                      label="Expiry Date"
+                      labelAccessibilityVisibility="exclusive"
+                      value={batch.expirationDate}
+                      required
+                      onChange={(event) =>
+                        updateBatch(batch.id, {
+                          expirationDate: event.currentTarget.value,
+                        })
+                      }
+                    />
+                    {freshness ? (
+                      <s-badge tone={STATUS_TONE[freshness.status]}>
+                        {formatDaysRemaining(freshness.daysRemaining)}
+                      </s-badge>
+                    ) : (
+                      <s-badge tone="info">No expiry date</s-badge>
+                    )}
+                    <s-button
+                      icon="delete"
+                      variant="tertiary"
+                      tone="critical"
+                      accessibilityLabel="Remove batch"
+                      onClick={() => removeBatch(batch.id)}
+                    />
+                  </Fragment>
+                );
+              })}
+            </s-grid>
+          </s-query-container>
+        )}
+        <s-button icon="plus" onClick={addBatch}>
+          Add batch
+        </s-button>
       </s-stack>
     </s-admin-block>
   );

@@ -37,11 +37,6 @@ name = "Quantity"
 type = "number_integer"
 required = true
 
-[metaobjects.app.freshness_batch.fields.restocked_on]
-name = "Restocked On"
-type = "date"
-required = false
-
 [metaobjects.app.freshness_batch.fields.expiration_date]
 name = "Expiration Date"
 type = "date"

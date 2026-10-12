@@ -2,7 +2,7 @@ export type FreshnessStatus = "Fresh" | "Use Soon" | "Expired";
 
 export interface BatchFreshness {
   status: FreshnessStatus;
-  daysRemaining: number; //if today is Sep 13 and it expires Sep 15 .. it's 3 days
+  daysRemaining: number; // if today is Sep 13 and it expires Sep 15, it's 2 days
 }
 
 export interface Batch {
@@ -10,8 +10,8 @@ export interface Batch {
   expirationDate: string;
 }
 
-//Get how many miliseconds per day
-//Used to get the miliseconds for a date
+// How many milliseconds are in one day
+// Used to convert a millisecond difference between two dates into days
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -32,8 +32,8 @@ function parseDateOnly(dateString: string): number {
 
   if (
     roundTrip.getUTCFullYear() !== year ||
-    roundTrip.getUTCMonth() != month - 1 ||
-    roundTrip.getUTCDate() != day
+    roundTrip.getUTCMonth() !== month - 1 ||
+    roundTrip.getUTCDate() !== day
   ) {
     throw new Error(`"${dateString}" is not a real calendar date`);
   }
@@ -105,4 +105,15 @@ export function computeAggregateFreshness(
   if (statuses.includes("Expired")) return "Expired";
   if (statuses.includes("Use Soon")) return "Use Soon";
   return "Fresh";
+}
+
+export function formatDaysRemaining(daysRemaining: number): string {
+  const days = Math.abs(daysRemaining);
+  const amount = days > 99 ? `${Math.floor(days / 30)}mo` : `${days}d`;
+
+  if (daysRemaining < -1) return `Expired ${amount} ago`;
+  if (daysRemaining === -1) return "Expired yesterday";
+  if (daysRemaining === 0) return "Expires today";
+  if (daysRemaining === 1) return "Expires tomorrow";
+  return `Expires in ${amount}`;
 }

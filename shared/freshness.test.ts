@@ -5,6 +5,7 @@ import {
   getShopToday,
   computeBatchFreshness,
   computeAggregateFreshness,
+  formatDaysRemaining,
 } from "./freshness";
 
 describe("computeBatchFreshness", () => {
@@ -92,5 +93,22 @@ describe("parseDateOnly validation (via computeBatchFreshness)", () => {
 
   it("still works correctly for a valid date (no false positives)", () => {
     expect(() => computeBatchFreshness("2026-09-20", today)).not.toThrow();
+  });
+});
+
+describe("formatDaysRemaining", () => {
+  it.each([
+    [-150, "Expired 5mo ago"],
+    [-100, "Expired 3mo ago"],
+    [-99, "Expired 99d ago"],
+    [-8, "Expired 8d ago"],
+    [-1, "Expired yesterday"],
+    [0, "Expires today"],
+    [1, "Expires tomorrow"],
+    [3, "Expires in 3d"],
+    [99, "Expires in 99d"],
+    [100, "Expires in 3mo"],
+  ])("formats %i as %s", (daysRemaining, expected) => {
+    expect(formatDaysRemaining(daysRemaining)).toBe(expected);
   });
 });

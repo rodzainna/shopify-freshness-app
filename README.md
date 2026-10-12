@@ -2,9 +2,9 @@
 
 A small, scoped Shopify app being built as a portfolio piece to demonstrate custom Shopify app development — Admin UI extensions, token-exchange auth, webhooks, metafields/metaobjects, and order-driven inventory logic (FEFO batch decrement on fulfillment). Not a production product.
 
-**Planned functionality** (full design in [`SPEC.md`](./SPEC.md)): merchants track per-batch shelf life/expiration on perishable products via an Admin extension, view a dashboard overview of freshness status across products, and have stock automatically decremented FEFO-style when an order is fulfilled.
+**Planned functionality:** merchants track per-batch expiration dates on perishable products via an Admin extension, view a dashboard overview of freshness status across products, and have stock automatically decremented FEFO-style when an order is fulfilled.
 
-**Current status:** early build — only initial setup/scaffolding is complete. See [`tasks/todo.md`](./tasks/todo.md) for live progress and [`tasks/plan.md`](./tasks/plan.md) for the phased build plan.
+**Current status:** in progress. Done so far: install/uninstall lifecycle (token exchange, webhook dedup, malformed-payload handling), the batch metaobject and product metafield definitions, shared freshness logic (unit-tested), and the product-page panel UI for batch rows. Next: saving batches to Shopify, then the dashboard and FEFO decrement on fulfillment.
 
 Scaffolded from Shopify's official React Router app template — the rest of this README is template-level framework/setup documentation, trimmed to what's actually relevant to this project's stack (macOS, npm, SQLite, no MongoDB, no Windows).
 
@@ -56,7 +56,7 @@ export async function loader({ request }) {
 }
 ```
 
-> **Note for this project:** `app/routes/app._index.tsx` still contains the scaffold's demo product-generation code built on this pattern — its demo metafield/metaobject definitions were already trimmed from `shopify.app.toml`, so it likely errors if run as-is (not yet verified live). That whole route gets replaced by the real dashboard in Phase 3 (see `tasks/plan.md`).
+> **Note for this project:** `app/routes/app._index.tsx` still contains the scaffold's demo product-generation code built on this pattern — its demo metafield/metaobject definitions were already trimmed from `shopify.app.toml`, so it likely errors if run as-is (not yet verified live). That whole route gets replaced by the real dashboard later in the build.
 
 Please read the [documentation for @shopify/shopify-app-react-router](https://shopify.dev/docs/api/shopify-app-react-router) to see what other API's are available.
 
@@ -80,7 +80,7 @@ npm run build
 
 ## Hosting
 
-**For this project:** dev-store-only for v1, per `SPEC.md` — no public deploy planned unless a live demo link is later needed for the portfolio. If that changes, see [Shopify's deployment documentation](https://shopify.dev/docs/apps/launch/deployment) for hosting options (Google Cloud Run has the most detailed React Router-specific tutorial).
+**For this project:** dev-store-only for v1 — no public deploy planned unless a live demo link is later needed for the portfolio. If that changes, see [Shopify's deployment documentation](https://shopify.dev/docs/apps/launch/deployment) for hosting options (Google Cloud Run has the most detailed React Router-specific tutorial).
 
 ## Gotchas / Troubleshooting
 
