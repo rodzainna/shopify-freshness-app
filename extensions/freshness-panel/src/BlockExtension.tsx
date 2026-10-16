@@ -34,6 +34,7 @@ export default async () => {
             nodes {
               ... on Metaobject {
                 id
+                handle
                 quantity: field(key: "quantity") {
                   value
                 }
@@ -65,12 +66,15 @@ export default async () => {
 
 interface PanelBatch {
   id: string;
+  // metaobjectUpsert finds the batch by this, so it must stay the same between saves
+  handle: string;
   quantity: number;
   expirationDate: string;
 }
 
 interface FreshnessBatchNode {
   id: string;
+  handle: string;
   quantity: { value: string } | null;
   expirationDate: { value: string } | null;
 }
@@ -96,6 +100,7 @@ const STATUS_TONE: Record<FreshnessStatus, "success" | "warning" | "critical"> =
 function toPanelBatch(node: FreshnessBatchNode): PanelBatch {
   return {
     id: node.id,
+    handle: node.handle,
     quantity: Number(node.quantity?.value ?? 0),
     expirationDate: node.expirationDate?.value ?? "",
   };
@@ -140,10 +145,15 @@ function Extension({
   }
 
   function addBatch() {
+    // Not saved yet, so there's no Shopify ID. The UUID is the local id and
+    // also becomes the handle Shopify stores the batch under on first save.
+    const uuid = crypto.randomUUID();
+
     setBatches((current) => [
       ...current,
       {
-        id: crypto.randomUUID(),
+        id: uuid,
+        handle: uuid,
         quantity: 0,
         expirationDate: "",
       },
