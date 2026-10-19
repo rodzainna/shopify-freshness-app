@@ -273,9 +273,11 @@ function Extension({
 
   const [batches, setBatches] = useState<PanelBatch[]>(initialBatches);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function saveBatches() {
     setSaving(true);
+    setSaveError(null);
     try {
       // Save all rows at once, then swap in the Shopify IDs we got back
       const saved = await Promise.all(
@@ -293,6 +295,8 @@ function Extension({
         getEarliestExpirationDate(saved),
       );
       setBatches(saved);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
     }
@@ -332,6 +336,11 @@ function Extension({
       collapsedSummary={`${batches.length} ${batches.length === 1 ? "batch" : "batches"}`}
     >
       <s-stack direction="block" gap="base">
+        {saveError && (
+          <s-banner heading="Batches weren't saved" tone="critical">
+            {saveError}
+          </s-banner>
+        )}
         {batches.length > 0 && (
           <s-query-container>
             <s-grid
