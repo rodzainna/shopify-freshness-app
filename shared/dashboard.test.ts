@@ -48,6 +48,7 @@ describe("toDashboardRows", () => {
       id: "gid://shopify/Product/1",
       title: "Sourdough loaf",
       earliestExpirationDate: "2026-10-10",
+      status: "Expired",
       batches: [
         {
           id: "gid://shopify/Metaobject/1",
@@ -72,6 +73,7 @@ describe("toDashboardRows", () => {
         id: "gid://shopify/Product/1",
         title: "Sourdough loaf",
         earliestExpirationDate: null,
+        status: "Not set",
         batches: [],
         hasMoreBatches: false,
       },
@@ -137,6 +139,66 @@ describe("toDashboardRows", () => {
     );
 
     expect(row.batches[0].freshness).toBeNull();
+  });
+
+  it("ignores sold-out batches in the product status", () => {
+    const [row] = toDashboardRows(
+      [
+        product({
+          freshnessBatches: {
+            references: {
+              nodes: [
+                batch("gid://shopify/Metaobject/1", "0", "2026-10-10"),
+                batch("gid://shopify/Metaobject/2", "5", "2026-11-20"),
+              ],
+              pageInfo: { hasNextPage: false },
+            },
+          },
+        }),
+      ],
+      TODAY,
+    );
+
+    expect(row.status).toBe("Fresh");
+  });
+
+  it("is Not set when every batch is sold out", () => {
+    const [row] = toDashboardRows(
+      [
+        product({
+          freshnessBatches: {
+            references: {
+              nodes: [batch("gid://shopify/Metaobject/1", "0", "2026-10-10")],
+              pageInfo: { hasNextPage: false },
+            },
+          },
+        }),
+      ],
+      TODAY,
+    );
+
+    expect(row.status).toBe("Not set");
+  });
+
+  it("doesn't fail on an unreadable stored date", () => {
+    const [row] = toDashboardRows(
+      [
+        product({
+          freshnessBatches: {
+            references: {
+              nodes: [
+                batch("gid://shopify/Metaobject/1", "2", "2026-02-30"),
+                batch("gid://shopify/Metaobject/2", "5", "2026-10-21"),
+              ],
+              pageInfo: { hasNextPage: false },
+            },
+          },
+        }),
+      ],
+      TODAY,
+    );
+
+    expect(row.status).toBe("Use Soon");
   });
 
   it("keeps products in the order the query returned them", () => {
