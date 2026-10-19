@@ -13,12 +13,16 @@ export interface FefoResult<T extends Batch> {
 
 /**
  * First expired, first out: takes `quantity` units from the soonest-expiring
- * in-stock batches, splitting across batches when one runs out. Pure, so the
- * caller decides how to write the result.
+ * in-stock batches, splitting across batches when one runs out. Expired
+ * batches are never used, since expired stock shouldn't be shipped. Pure, so
+ * the caller decides how to write the result.
+ *
+ * @param today - the shop-local "today", "YYYY-MM-DD" (see getShopToday)
  */
 export function decrementFefo<T extends Batch>(
   batches: T[],
   quantity: number,
+  today: string,
 ): FefoResult<T> {
   if (!Number.isInteger(quantity) || quantity <= 0) {
     return { remaining: [...batches], updated: [], emptied: [], shortfall: 0 };
@@ -26,14 +30,16 @@ export function decrementFefo<T extends Batch>(
 
   // Keyed by position, so the same batch object listed twice stays separate
   const pickOrder = batches
-    .map((batch, index) => ({
-      batch,
-      index,
-      readable: isCalendarDate(batch.expirationDate),
-    }))
+    .map((batch, index) => ({ batch, index }))
     .filter(
       ({ batch }) => Number.isInteger(batch.quantity) && batch.quantity > 0,
     )
+    .map((candidate) => ({
+      ...candidate,
+      readable: isCalendarDate(candidate.batch.expirationDate),
+    }))
+    // Still usable on the expiry day; an unreadable date can't be judged
+    .filter(({ batch, readable }) => !readable || batch.expirationDate >= today)
     // sort() is stable, so equal dates keep their order
     .sort(compareExpiry);
 
