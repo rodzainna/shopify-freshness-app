@@ -6,6 +6,7 @@ import {
   computeBatchFreshness,
   computeAggregateFreshness,
   formatDaysRemaining,
+  getEarliestExpirationDate,
 } from "./freshness";
 
 describe("computeBatchFreshness", () => {
@@ -110,5 +111,41 @@ describe("formatDaysRemaining", () => {
     [100, "Expires in 3mo"],
   ])("formats %i as %s", (daysRemaining, expected) => {
     expect(formatDaysRemaining(daysRemaining)).toBe(expected);
+  });
+});
+
+describe("getEarliestExpirationDate", () => {
+  it("returns the soonest expiry date across batches", () => {
+    const batches: Batch[] = [
+      { quantity: 5, expirationDate: "2026-10-20" },
+      { quantity: 3, expirationDate: "2026-10-02" },
+      { quantity: 8, expirationDate: "2026-11-15" },
+    ];
+    expect(getEarliestExpirationDate(batches)).toBe("2026-10-02");
+  });
+
+  it("ignores batches with no stock left", () => {
+    const batches: Batch[] = [
+      { quantity: 0, expirationDate: "2026-10-01" },
+      { quantity: 4, expirationDate: "2026-10-09" },
+    ];
+    expect(getEarliestExpirationDate(batches)).toBe("2026-10-09");
+  });
+
+  it("ignores batches without an expiry date", () => {
+    const batches: Batch[] = [
+      { quantity: 2, expirationDate: "" },
+      { quantity: 4, expirationDate: "2026-10-09" },
+    ];
+    expect(getEarliestExpirationDate(batches)).toBe("2026-10-09");
+  });
+
+  it("returns null when no batch is in stock", () => {
+    expect(getEarliestExpirationDate([])).toBeNull();
+    expect(
+      getEarliestExpirationDate([
+        { quantity: 0, expirationDate: "2026-10-01" },
+      ]),
+    ).toBeNull();
   });
 });
