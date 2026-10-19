@@ -3,10 +3,11 @@ import {
   type BatchFreshness,
   formatDaysRemaining,
   computeBatchFreshness,
+  getEarliestExpirationDate,
   getShopToday,
   type FreshnessStatus,
 } from "../../../shared/freshness";
-import { Fragment, render } from "preact";
+import { render } from "preact";
 import { useState } from "preact/hooks";
 
 interface PanelData {
@@ -57,6 +58,7 @@ export default async () => {
 
   render(
     <Extension
+      productId={productId}
       timezone={data?.shop.ianaTimezone ?? "UTC"}
       initialBatches={savedBatches}
     />,
@@ -106,6 +108,143 @@ function toPanelBatch(node: FreshnessBatchNode): PanelBatch {
   };
 }
 
+interface SaveBatchData {
+  metaobjectUpsert: {
+    metaobject: { id: string } | null;
+    userErrors: { field: string[] | null; message: string }[];
+  } | null;
+}
+
+// Creates the batch in Shopify, or updates it if its handle already exists.
+// Returns the batch's Shopify ID.
+async function saveBatch(batch: PanelBatch): Promise<string> {
+  const { data, errors } = await shopify.query<SaveBatchData>(
+    `
+    mutation SaveBatch(
+      $handle: String!
+      $quantity: String!
+      $expirationDate: String!
+    ) {
+      metaobjectUpsert(
+        handle: { type: "$app:freshness_batch", handle: $handle }
+        metaobject: {
+          fields: [
+            { key: "quantity", value: $quantity }
+            { key: "expiration_date", value: $expirationDate }
+          ]
+        }
+      ) {
+        metaobject {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `,
+    {
+      variables: {
+        handle: batch.handle,
+        // Metaobject field values are always sent as strings
+        quantity: String(batch.quantity),
+        expirationDate: batch.expirationDate,
+      },
+    },
+  );
+
+  // errors = the request itself failed; userErrors = Shopify rejected the values
+  const result = data?.metaobjectUpsert;
+  const messages = [
+    ...(errors ?? []).map((error) => error.message),
+    ...(result?.userErrors ?? []).map((error) => error.message),
+  ];
+
+  if (messages.length > 0 || !result?.metaobject) {
+    throw new Error(`Saving batch failed: ${messages.join("; ")}`);
+  }
+
+  return result.metaobject.id;
+}
+
+interface UserErrorsPayload {
+  userErrors: { field: string[] | null; message: string }[];
+}
+
+interface SaveProductFreshnessData {
+  metafieldsSet: UserErrorsPayload | null;
+  metafieldsDelete?: UserErrorsPayload | null;
+}
+
+// Points the product at its saved batches and updates the date the storefront
+// reads. With nothing in stock there's no date to show, so it's deleted.
+async function saveProductFreshness(
+  productId: string,
+  batchIds: string[],
+  earliestExpirationDate: string | null,
+): Promise<void> {
+  const metafields = [
+    {
+      ownerId: productId,
+      key: "freshness_batches",
+      value: JSON.stringify(batchIds),
+    },
+  ];
+
+  if (earliestExpirationDate) {
+    metafields.push({
+      ownerId: productId,
+      key: "earliest_expiration_date",
+      value: earliestExpirationDate,
+    });
+  }
+
+  const { data, errors } = await shopify.query<SaveProductFreshnessData>(
+    `
+    mutation SaveProductFreshness(
+      $metafields: [MetafieldsSetInput!]!
+      $productId: ID!
+      $clearEarliest: Boolean!
+    ) {
+      metafieldsSet(metafields: $metafields) {
+        userErrors {
+          field
+          message
+        }
+      }
+      metafieldsDelete(
+        metafields: [
+          { ownerId: $productId, namespace: "$app", key: "earliest_expiration_date" }
+        ]
+      ) @include(if: $clearEarliest) {
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `,
+    {
+      variables: {
+        metafields,
+        productId,
+        clearEarliest: earliestExpirationDate === null,
+      },
+    },
+  );
+
+  const messages = [
+    ...(errors ?? []).map((error) => error.message),
+    ...(data?.metafieldsSet?.userErrors ?? []).map((error) => error.message),
+    ...(data?.metafieldsDelete?.userErrors ?? []).map((error) => error.message),
+  ];
+
+  if (messages.length > 0) {
+    throw new Error(`Saving product freshness failed: ${messages.join("; ")}`);
+  }
+}
+
 function getFreshness(
   expirationDate: string,
   today: string,
@@ -120,9 +259,11 @@ function getFreshness(
 }
 
 function Extension({
+  productId,
   timezone,
   initialBatches,
 }: {
+  productId: string;
   timezone: string;
   initialBatches: PanelBatch[];
 }) {
@@ -131,6 +272,35 @@ function Extension({
   const today = getShopToday(timezone, new Date());
 
   const [batches, setBatches] = useState<PanelBatch[]>(initialBatches);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function saveBatches() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // Save all rows at once, then swap in the Shopify IDs we got back
+      const saved = await Promise.all(
+        batches.map(async (batch) => ({
+          ...batch,
+          id: await saveBatch(batch),
+        })),
+      );
+
+      // Only link the batches once every one of them saved, so the product
+      // never points at a batch that doesn't exist
+      await saveProductFreshness(
+        productId,
+        saved.map((batch) => batch.id),
+        getEarliestExpirationDate(saved),
+      );
+      setBatches(saved);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function updateBatch(id: string, changes: Partial<PanelBatch>) {
     setBatches((current) =>
@@ -166,23 +336,34 @@ function Extension({
       collapsedSummary={`${batches.length} ${batches.length === 1 ? "batch" : "batches"}`}
     >
       <s-stack direction="block" gap="base">
+        {saveError && (
+          <s-banner heading="Batches weren't saved" tone="critical">
+            {saveError}
+          </s-banner>
+        )}
         {batches.length > 0 && (
           <s-query-container>
-            <s-grid
-              gridTemplateColumns={ROW_COLUMNS}
-              columnGap="base"
-              rowGap="small-200"
-              alignItems="center"
-            >
-              <s-text>Quantity</s-text>
-              <s-text>Expiry Date *</s-text>
-              <s-text>Status</s-text>
-              <s-text />
+            <s-stack direction="block" gap="small-200">
+              <s-grid gridTemplateColumns={ROW_COLUMNS} columnGap="base">
+                <s-text>Quantity</s-text>
+                <s-text>Expiry Date *</s-text>
+                <s-text>Status</s-text>
+              </s-grid>
               {batches.map((batch) => {
                 const freshness = getFreshness(batch.expirationDate, today);
 
+                // One grid per row: mounting several keyed Fragments into a
+                // shared grid at once interleaved their cells. The fixed
+                // column template keeps every row's columns aligned.
+                // Keyed by handle, which survives a save; id changes to the
+                // Shopify GID on first save and would remount the row.
                 return (
-                  <Fragment key={batch.id}>
+                  <s-grid
+                    key={batch.handle}
+                    gridTemplateColumns={ROW_COLUMNS}
+                    columnGap="base"
+                    alignItems="center"
+                  >
                     <s-number-field
                       label="Quantity"
                       labelAccessibilityVisibility="exclusive"
@@ -218,15 +399,25 @@ function Extension({
                       accessibilityLabel="Remove batch"
                       onClick={() => removeBatch(batch.id)}
                     />
-                  </Fragment>
+                  </s-grid>
                 );
               })}
-            </s-grid>
+            </s-stack>
           </s-query-container>
         )}
-        <s-button icon="plus" onClick={addBatch}>
-          Add batch
-        </s-button>
+        <s-stack direction="inline" gap="base">
+          <s-button icon="plus" onClick={addBatch}>
+            Add batch
+          </s-button>
+          <s-button
+            variant="primary"
+            loading={saving}
+            disabled={batches.length === 0}
+            onClick={saveBatches}
+          >
+            Save
+          </s-button>
+        </s-stack>
       </s-stack>
     </s-admin-block>
   );
