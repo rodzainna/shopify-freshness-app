@@ -41,6 +41,15 @@ function parseDateOnly(dateString: string): number {
   return utcMs;
 }
 
+export function isCalendarDate(dateString: string): boolean {
+  try {
+    parseDateOnly(dateString);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * We want to know the actual shop's date now/today
  *
