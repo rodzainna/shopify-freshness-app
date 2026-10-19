@@ -107,6 +107,21 @@ export function computeAggregateFreshness(
   return "Fresh";
 }
 
+/**
+ * The product-level date the storefront shows. Only in-stock batches count,
+ * matching computeAggregateFreshness: a sold-out batch shouldn't set it.
+ *
+ * @returns the soonest "YYYY-MM-DD" expiry, or null if no batch is in stock
+ */
+export function getEarliestExpirationDate(batches: Batch[]): string | null {
+  const dates = batches
+    .filter((batch) => batch.quantity > 0 && batch.expirationDate)
+    .map((batch) => batch.expirationDate);
+
+  // YYYY-MM-DD strings sort in calendar order, so no date parsing is needed
+  return dates.length > 0 ? dates.sort()[0] : null;
+}
+
 export function formatDaysRemaining(daysRemaining: number): string {
   const days = Math.abs(daysRemaining);
   const amount = days > 99 ? `${Math.floor(days / 30)}mo` : `${days}d`;
