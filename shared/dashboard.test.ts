@@ -201,6 +201,30 @@ describe("toDashboardRows", () => {
     expect(row.status).toBe("Use Soon");
   });
 
+  it("recomputes status from today rather than storing it", () => {
+    const stored = [
+      product({
+        freshnessBatches: {
+          references: {
+            nodes: [batch("gid://shopify/Metaobject/1", "6", "2026-10-25")],
+            pageInfo: { hasNextPage: false },
+          },
+        },
+      }),
+    ];
+
+    // Same stored data on each day either side of the thresholds
+    const statusOn = (today: string) => {
+      const [row] = toDashboardRows(stored, today);
+      return [row.status, row.batches[0].freshness?.status];
+    };
+
+    expect(statusOn("2026-10-21")).toStrictEqual(["Fresh", "Fresh"]); // 4 days
+    expect(statusOn("2026-10-22")).toStrictEqual(["Use Soon", "Use Soon"]); // 3 days
+    expect(statusOn("2026-10-25")).toStrictEqual(["Use Soon", "Use Soon"]); // expiry day
+    expect(statusOn("2026-10-26")).toStrictEqual(["Expired", "Expired"]); // 1 day past
+  });
+
   it("returns no rows for a store with no products", () => {
     expect(toDashboardRows([], TODAY)).toStrictEqual([]);
   });
