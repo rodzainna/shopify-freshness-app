@@ -258,6 +258,10 @@ async function deleteBatch(id: string): Promise<void> {
   }
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function getFreshness(
   expirationDate: string,
   today: string,
@@ -284,7 +288,11 @@ function Extension({
 
   const [batches, setBatches] = useState<PanelBatch[]>(initialBatches);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<{
+    tone: "critical" | "warning";
+    heading: string;
+    message: string;
+  } | null>(null);
   // Saved batches the merchant removed; their metaobjects go on the next save
   const [removedIds, setRemovedIds] = useState<string[]>([]);
 
@@ -315,9 +323,19 @@ function Extension({
       const firstFailure = deletes.find(
         (result) => result.status === "rejected",
       );
-      if (firstFailure) throw firstFailure.reason;
+      if (firstFailure) {
+        setSaveError({
+          tone: "warning",
+          heading: "Saved, but a removed batch wasn't deleted",
+          message: errorMessage(firstFailure.reason),
+        });
+      }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : String(error));
+      setSaveError({
+        tone: "critical",
+        heading: "Batches weren't saved",
+        message: errorMessage(error),
+      });
     } finally {
       setSaving(false);
     }
@@ -336,7 +354,9 @@ function Extension({
 
     // Rows that were never saved only exist locally; nothing to delete
     if (id.startsWith("gid://")) {
-      setRemovedIds((current) => [...current, id]);
+      setRemovedIds((current) =>
+        current.includes(id) ? current : [...current, id],
+      );
     }
   }
 
@@ -363,8 +383,8 @@ function Extension({
     >
       <s-stack direction="block" gap="base">
         {saveError && (
-          <s-banner heading="Batches weren't saved" tone="critical">
-            {saveError}
+          <s-banner heading={saveError.heading} tone={saveError.tone}>
+            {saveError.message}
           </s-banner>
         )}
         {batches.length > 0 && (
