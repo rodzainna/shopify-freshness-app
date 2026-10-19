@@ -9,6 +9,11 @@ import {
 } from "../../../shared/freshness";
 import { planProductMetafieldWrites } from "../../../shared/product-metafields";
 import { applySavedIds, failedItems } from "../../../shared/settled";
+import {
+  MAX_QUANTITY,
+  hasErrors,
+  validateBatch,
+} from "../../../shared/validation";
 import { render } from "preact";
 import { useState } from "preact/hooks";
 
@@ -295,10 +300,15 @@ function Extension({
   } | null>(null);
   // Saved batches the merchant removed; their metaobjects go on the next save
   const [removedIds, setRemovedIds] = useState<string[]>([]);
+  // Errors stay hidden until the first save attempt, then update live
+  const [showErrors, setShowErrors] = useState(false);
 
   async function saveBatches() {
-    setSaving(true);
     setSaveError(null);
+    setShowErrors(true);
+    if (batches.some((batch) => hasErrors(validateBatch(batch)))) return;
+
+    setSaving(true);
     try {
       // Rows that saved keep their Shopify ID even if another row failed,
       // so removing one later still deletes its metaobject
@@ -314,6 +324,8 @@ function Extension({
         saved.map((batch) => batch.id),
         getEarliestExpirationDate(saved),
       );
+      // Rows added after a successful save start without errors again
+      setShowErrors(false);
 
       // Delete last, so a failure can't leave the product referencing a
       // missing batch. Failed deletes stay queued for the next save.
@@ -397,6 +409,7 @@ function Extension({
               </s-grid>
               {batches.map((batch) => {
                 const freshness = getFreshness(batch.expirationDate, today);
+                const errors = showErrors ? validateBatch(batch) : {};
 
                 // One grid per row: mounting several keyed Fragments into a
                 // shared grid at once interleaved their cells. The fixed
@@ -414,6 +427,10 @@ function Extension({
                       label="Quantity"
                       labelAccessibilityVisibility="exclusive"
                       value={String(batch.quantity)}
+                      min={1}
+                      max={MAX_QUANTITY}
+                      step={1}
+                      error={errors.quantity}
                       disabled={saving}
                       onChange={(event) =>
                         updateBatch(batch.id, {
@@ -426,6 +443,7 @@ function Extension({
                       labelAccessibilityVisibility="exclusive"
                       value={batch.expirationDate}
                       required
+                      error={errors.expirationDate}
                       disabled={saving}
                       onChange={(event) =>
                         updateBatch(batch.id, {
