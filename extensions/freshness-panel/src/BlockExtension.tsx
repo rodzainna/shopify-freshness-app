@@ -398,6 +398,7 @@ function Extension({
                       label="Quantity"
                       labelAccessibilityVisibility="exclusive"
                       value={String(batch.quantity)}
+                      disabled={saving}
                       onChange={(event) =>
                         updateBatch(batch.id, {
                           quantity: Number(event.currentTarget.value),
@@ -409,6 +410,7 @@ function Extension({
                       labelAccessibilityVisibility="exclusive"
                       value={batch.expirationDate}
                       required
+                      disabled={saving}
                       onChange={(event) =>
                         updateBatch(batch.id, {
                           expirationDate: event.currentTarget.value,
@@ -427,6 +429,7 @@ function Extension({
                       variant="tertiary"
                       tone="critical"
                       accessibilityLabel="Remove batch"
+                      disabled={saving}
                       onClick={() => removeBatch(batch.id)}
                     />
                   </s-grid>
@@ -436,7 +439,7 @@ function Extension({
           </s-query-container>
         )}
         <s-stack direction="inline" gap="base">
-          <s-button icon="plus" onClick={addBatch}>
+          <s-button icon="plus" disabled={saving} onClick={addBatch}>
             Add batch
           </s-button>
           <s-button
