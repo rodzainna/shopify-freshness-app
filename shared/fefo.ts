@@ -1,4 +1,4 @@
-import { type Batch, isCalendarDate } from "./freshness";
+import { type Batch, isCalendarDate, isInStock } from "./freshness";
 
 export interface FefoResult<T extends Batch> {
   // Batches still linked to the product, in their original order
@@ -31,9 +31,7 @@ export function decrementFefo<T extends Batch>(
   // Keyed by position, so the same batch object listed twice stays separate
   const pickOrder = batches
     .map((batch, index) => ({ batch, index }))
-    .filter(
-      ({ batch }) => Number.isInteger(batch.quantity) && batch.quantity > 0,
-    )
+    .filter(({ batch }) => isInStock(batch))
     .map((candidate) => ({
       ...candidate,
       readable: isCalendarDate(candidate.batch.expirationDate),

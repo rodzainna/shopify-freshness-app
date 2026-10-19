@@ -11,6 +11,7 @@ import {
   FRESHNESS_TONE,
   formatDaysRemaining,
   getShopToday,
+  isInStock,
 } from "../../shared/freshness";
 
 // One page only in v1; batch counts per product are small
@@ -138,7 +139,7 @@ export default function Dashboard() {
                         <s-text>
                           {batch.quantity} × {batch.expirationDate || "no date"}
                         </s-text>
-                        {batch.quantity <= 0 ? (
+                        {!isInStock(batch) ? (
                           <s-badge>Sold out</s-badge>
                         ) : (
                           batch.freshness && (

@@ -107,6 +107,11 @@ export function computeBatchFreshness(
   return { status, daysRemaining };
 }
 
+// One definition of stock for every freshness calculation
+export function isInStock(batch: Batch): boolean {
+  return Number.isInteger(batch.quantity) && batch.quantity > 0;
+}
+
 export function computeAggregateFreshness(
   batches: Batch[],
   today: string,
@@ -114,7 +119,7 @@ export function computeAggregateFreshness(
   // Skips unreadable dates rather than throwing, so one bad batch can't
   // break a whole page
   const activeBatches = batches.filter(
-    (batch) => batch.quantity > 0 && isCalendarDate(batch.expirationDate),
+    (batch) => isInStock(batch) && isCalendarDate(batch.expirationDate),
   );
 
   if (activeBatches.length === 0) {
@@ -138,7 +143,7 @@ export function computeAggregateFreshness(
  */
 export function getEarliestExpirationDate(batches: Batch[]): string | null {
   const dates = batches
-    .filter((batch) => batch.quantity > 0 && batch.expirationDate)
+    .filter((batch) => isInStock(batch) && batch.expirationDate)
     .map((batch) => batch.expirationDate);
 
   // YYYY-MM-DD strings sort in calendar order, so no date parsing is needed
