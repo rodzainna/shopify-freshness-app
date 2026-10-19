@@ -8,6 +8,7 @@ import {
   type FreshnessStatus,
 } from "../../../shared/freshness";
 import { planProductMetafieldWrites } from "../../../shared/product-metafields";
+import { applySavedIds, failedItems } from "../../../shared/settled";
 import { render } from "preact";
 import { useState } from "preact/hooks";
 
@@ -291,13 +292,12 @@ function Extension({
     setSaving(true);
     setSaveError(null);
     try {
-      // Save all rows at once, then swap in the Shopify IDs we got back
-      const saved = await Promise.all(
-        batches.map(async (batch) => ({
-          ...batch,
-          id: await saveBatch(batch),
-        })),
-      );
+      // Rows that saved keep their Shopify ID even if another row failed,
+      // so removing one later still deletes its metaobject
+      const upserts = await Promise.allSettled(batches.map(saveBatch));
+      const { items: saved, errors } = applySavedIds(batches, upserts);
+      setBatches(saved);
+      if (errors.length > 0) throw errors[0];
 
       // Only link the batches once every one of them saved, so the product
       // never points at a batch that doesn't exist
@@ -306,17 +306,13 @@ function Extension({
         saved.map((batch) => batch.id),
         getEarliestExpirationDate(saved),
       );
-      setBatches(saved);
 
       // Delete last, so a failure can't leave the product referencing a
       // missing batch. Failed deletes stay queued for the next save.
-      const results = await Promise.allSettled(removedIds.map(deleteBatch));
-      const failed = results.flatMap((result, index) =>
-        result.status === "rejected" ? [removedIds[index]] : [],
-      );
-      setRemovedIds(failed);
+      const deletes = await Promise.allSettled(removedIds.map(deleteBatch));
+      setRemovedIds(failedItems(removedIds, deletes));
 
-      const firstFailure = results.find(
+      const firstFailure = deletes.find(
         (result) => result.status === "rejected",
       );
       if (firstFailure) throw firstFailure.reason;
