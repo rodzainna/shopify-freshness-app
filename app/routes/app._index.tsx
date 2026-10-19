@@ -81,6 +81,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function Dashboard() {
   const { rows, hasMoreProducts } = useLoaderData<typeof loader>();
 
+  if (rows.length === 0) {
+    return (
+      <s-page heading="Freshness overview">
+        <s-section>
+          <s-stack gap="base" alignItems="center">
+            <s-heading>No products yet</s-heading>
+            <s-paragraph>
+              Add a product, then track its batches from the Freshness batches
+              block on the product page.
+            </s-paragraph>
+            <s-button variant="primary" href="shopify://admin/products/new">
+              Add product
+            </s-button>
+          </s-stack>
+        </s-section>
+      </s-page>
+    );
+  }
+
   return (
     <s-page heading="Freshness overview">
       <s-section padding="none">

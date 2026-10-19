@@ -201,6 +201,10 @@ describe("toDashboardRows", () => {
     expect(row.status).toBe("Use Soon");
   });
 
+  it("returns no rows for a store with no products", () => {
+    expect(toDashboardRows([], TODAY)).toStrictEqual([]);
+  });
+
   it("keeps products in the order the query returned them", () => {
     const rows = toDashboardRows(
       [
