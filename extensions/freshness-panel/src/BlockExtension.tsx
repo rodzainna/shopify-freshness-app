@@ -81,12 +81,6 @@ interface FreshnessBatchNode {
   expirationDate: { value: string } | null;
 }
 
-// const MOCK_BATCHES: PanelBatch[] = [
-//   { id: "1", quantity: 12, expirationDate: "2026-09-14" },
-//   { id: "2", quantity: 5, expirationDate: "2026-09-08" },
-//   { id: "3", quantity: 20, expirationDate: "2026-10-01" },
-// ];
-
 // s-date-field has a built-in 224px (14rem) min width, so on narrow blocks the
 // status badge gets whatever is left and truncates. Accepted trade-off.
 const ROW_COLUMNS =
@@ -267,8 +261,6 @@ function Extension({
   timezone: string;
   initialBatches: PanelBatch[];
 }) {
-  const { data } = shopify;
-  console.log({ data });
   const today = getShopToday(timezone, new Date());
 
   const [batches, setBatches] = useState<PanelBatch[]>(initialBatches);
