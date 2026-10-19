@@ -22,24 +22,60 @@ import {
 import { render } from "preact";
 import { useState } from "preact/hooks";
 
+interface PanelProduct extends ProductInventory {
+  freshnessBatches: {
+    references: {
+      nodes: FreshnessBatchNode[];
+      pageInfo: { hasNextPage: boolean };
+    };
+  } | null;
+}
+
 interface PanelData {
   shop: { ianaTimezone: string };
-  product:
-    | (ProductInventory & {
-        freshnessBatches: {
-          references: { nodes: FreshnessBatchNode[] };
-        } | null;
-      })
-    | null;
+  product: PanelProduct | null;
 }
+
+interface LoadedPanelData {
+  shop: PanelData["shop"];
+  product: PanelProduct;
+}
+
+// Shopify's largest page size; the panel loads every batch in one request
+const MAX_BATCHES = 250;
 
 export default async () => {
   const productId = shopify.data.selected[0].id;
 
-  // One request for the shop's timezone, the product's stock and its batches
-  const { data } = await shopify.query<PanelData>(
+  let data: LoadedPanelData;
+  try {
+    data = await loadPanelData(productId);
+  } catch (error) {
+    // Never fall back to an empty editor: saving it would unlink every batch
+    render(<LoadError message={errorMessage(error)} />, document.body);
+    return;
+  }
+
+  // No metafield yet (product never saved) -> start with an empty list
+  const savedBatches =
+    data.product.freshnessBatches?.references.nodes.map(toPanelBatch) ?? [];
+
+  render(
+    <Extension
+      productId={productId}
+      timezone={data.shop.ianaTimezone}
+      initialBatches={savedBatches}
+      inventory={data.product}
+    />,
+    document.body,
+  );
+};
+
+// One request for the shop's timezone, the product's stock and its batches
+async function loadPanelData(productId: string): Promise<LoadedPanelData> {
+  const { data, errors } = await shopify.query<PanelData>(
     `
-    query GetPanelData($productId: ID!) {
+    query GetPanelData($productId: ID!, $maxBatches: Int!) {
       shop {
         ianaTimezone
       }
@@ -47,7 +83,7 @@ export default async () => {
         tracksInventory
         totalInventory
         freshnessBatches: metafield(key: "freshness_batches") {
-          references(first: 50) {
+          references(first: $maxBatches) {
             nodes {
               ... on Metaobject {
                 id
@@ -60,28 +96,32 @@ export default async () => {
                 }
               }
             }
+            pageInfo {
+              hasNextPage
+            }
           }
         }
       }
     }
   `,
-    { variables: { productId } },
+    { variables: { productId, maxBatches: MAX_BATCHES } },
   );
 
-  // No metafield yet (product never saved) -> start with an empty list
-  const savedBatches =
-    data?.product?.freshnessBatches?.references.nodes.map(toPanelBatch) ?? [];
+  // Partial data counts as a failure: a missing batch list would look empty
+  if (errors?.length || !data?.product) {
+    const messages = (errors ?? []).map((error) => error.message);
+    throw new Error(
+      messages.length > 0 ? messages.join("; ") : "Product not found",
+    );
+  }
 
-  render(
-    <Extension
-      productId={productId}
-      timezone={data?.shop.ianaTimezone ?? "UTC"}
-      initialBatches={savedBatches}
-      inventory={data?.product ?? null}
-    />,
-    document.body,
-  );
-};
+  // Saving a partial list would unlink the batches that didn't load
+  if (data.product.freshnessBatches?.references.pageInfo.hasNextPage) {
+    throw new Error(`This product has more than ${MAX_BATCHES} batches.`);
+  }
+
+  return { shop: data.shop, product: data.product };
+}
 
 interface PanelBatch {
   id: string;
@@ -290,6 +330,17 @@ function getFreshness(
   }
 }
 
+function LoadError({ message }: { message: string }) {
+  return (
+    <s-admin-block heading="Freshness batches">
+      <s-banner heading="Batches couldn't be loaded" tone="critical">
+        <s-paragraph>{message}</s-paragraph>
+        <s-paragraph>Reload the page to try again.</s-paragraph>
+      </s-banner>
+    </s-admin-block>
+  );
+}
+
 function Extension({
   productId,
   timezone,
@@ -299,7 +350,7 @@ function Extension({
   productId: string;
   timezone: string;
   initialBatches: PanelBatch[];
-  inventory: ProductInventory | null;
+  inventory: ProductInventory;
 }) {
   const today = getShopToday(timezone, new Date());
 
@@ -400,7 +451,7 @@ function Extension({
     ]);
   }
 
-  const mismatch = inventory && getInventoryMismatch(batches, inventory);
+  const mismatch = getInventoryMismatch(batches, inventory);
 
   return (
     <s-admin-block
