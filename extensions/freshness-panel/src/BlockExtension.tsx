@@ -7,7 +7,7 @@ import {
   getShopToday,
   type FreshnessStatus,
 } from "../../../shared/freshness";
-import { Fragment, render } from "preact";
+import { render } from "preact";
 import { useState } from "preact/hooks";
 
 interface PanelData {
@@ -343,21 +343,27 @@ function Extension({
         )}
         {batches.length > 0 && (
           <s-query-container>
-            <s-grid
-              gridTemplateColumns={ROW_COLUMNS}
-              columnGap="base"
-              rowGap="small-200"
-              alignItems="center"
-            >
-              <s-text>Quantity</s-text>
-              <s-text>Expiry Date *</s-text>
-              <s-text>Status</s-text>
-              <s-text />
+            <s-stack direction="block" gap="small-200">
+              <s-grid gridTemplateColumns={ROW_COLUMNS} columnGap="base">
+                <s-text>Quantity</s-text>
+                <s-text>Expiry Date *</s-text>
+                <s-text>Status</s-text>
+              </s-grid>
               {batches.map((batch) => {
                 const freshness = getFreshness(batch.expirationDate, today);
 
+                // One grid per row: mounting several keyed Fragments into a
+                // shared grid at once interleaved their cells. The fixed
+                // column template keeps every row's columns aligned.
+                // Keyed by handle, which survives a save; id changes to the
+                // Shopify GID on first save and would remount the row.
                 return (
-                  <Fragment key={batch.id}>
+                  <s-grid
+                    key={batch.handle}
+                    gridTemplateColumns={ROW_COLUMNS}
+                    columnGap="base"
+                    alignItems="center"
+                  >
                     <s-number-field
                       label="Quantity"
                       labelAccessibilityVisibility="exclusive"
@@ -393,10 +399,10 @@ function Extension({
                       accessibilityLabel="Remove batch"
                       onClick={() => removeBatch(batch.id)}
                     />
-                  </Fragment>
+                  </s-grid>
                 );
               })}
-            </s-grid>
+            </s-stack>
           </s-query-container>
         )}
         <s-stack direction="inline" gap="base">
