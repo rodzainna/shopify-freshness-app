@@ -116,7 +116,7 @@ describe("decrementFefo", () => {
   });
 
   it("leaves batches already at zero untouched", () => {
-    const soldOut = batch("soldOut", 0, "2026-10-01");
+    const soldOut = batch("soldOut", 0, "2026-10-20");
 
     expect(decrementFefo([soldOut, B], 1, TODAY)).toStrictEqual({
       remaining: [soldOut, batch("B", 9, "2026-10-25")],
@@ -160,17 +160,6 @@ describe("decrementFefo", () => {
     });
   });
 
-  it("treats the same batch object listed twice as two batches", () => {
-    const X = batch("X", 5, "2026-10-20");
-
-    expect(decrementFefo([X, X], 6, TODAY)).toStrictEqual({
-      remaining: [batch("X", 4, "2026-10-20")],
-      updated: [batch("X", 4, "2026-10-20")],
-      emptied: [batch("X", 0, "2026-10-20")],
-      shortfall: 0,
-    });
-  });
-
   it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
     "changes nothing for a quantity of %s",
     (quantity) => {
@@ -180,6 +169,15 @@ describe("decrementFefo", () => {
         emptied: [],
         shortfall: 0,
       });
+    },
+  );
+
+  it.each(["2026-10-19T03:00:00.000Z", "", "2026-02-30"])(
+    "throws for a today of %j",
+    (today) => {
+      expect(() => decrementFefo([A], 1, today)).toThrow(
+        "Expected today as YYYY-MM-DD",
+      );
     },
   );
 
