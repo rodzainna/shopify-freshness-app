@@ -12,6 +12,7 @@ import {
   formatInventoryMismatch,
   getInventoryMismatch,
 } from "../../../shared/inventory";
+import { collectErrorMessages } from "../../../shared/graphql-errors";
 import { planProductMetafieldWrites } from "../../../shared/product-metafields";
 import { applySavedIds, failedItems } from "../../../shared/settled";
 import {
@@ -20,7 +21,7 @@ import {
   validateBatch,
 } from "../../../shared/validation";
 import { render } from "preact";
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 
 interface PanelProduct extends ProductInventory {
   freshnessBatches: {
@@ -45,14 +46,29 @@ interface LoadedPanelData {
 const MAX_BATCHES = 250;
 
 export default async () => {
-  const productId = shopify.data.selected[0].id;
+  await mountPanel(shopify.data.selected[0].id);
+};
 
+// A load failure that retrying can't fix, so the panel offers no retry
+class PermanentLoadError extends Error {}
+
+async function mountPanel(productId: string) {
   let data: LoadedPanelData;
   try {
     data = await loadPanelData(productId);
   } catch (error) {
     // Never fall back to an empty editor: saving it would unlink every batch
-    render(<LoadError message={errorMessage(error)} />, document.body);
+    render(
+      <LoadError
+        message={errorMessage(error)}
+        onRetry={
+          error instanceof PermanentLoadError
+            ? undefined
+            : () => mountPanel(productId)
+        }
+      />,
+      document.body,
+    );
     return;
   }
 
@@ -69,7 +85,7 @@ export default async () => {
     />,
     document.body,
   );
-};
+}
 
 // One request for the shop's timezone, the product's stock and its batches
 async function loadPanelData(productId: string): Promise<LoadedPanelData> {
@@ -108,16 +124,18 @@ async function loadPanelData(productId: string): Promise<LoadedPanelData> {
   );
 
   // Partial data counts as a failure: a missing batch list would look empty
-  if (errors?.length || !data?.product) {
-    const messages = (errors ?? []).map((error) => error.message);
-    throw new Error(
-      messages.length > 0 ? messages.join("; ") : "Product not found",
-    );
+  if (errors?.length) {
+    throw new Error(collectErrorMessages(errors).join("; "));
+  }
+  if (!data?.product) {
+    throw new PermanentLoadError("Product not found");
   }
 
   // Saving a partial list would unlink the batches that didn't load
   if (data.product.freshnessBatches?.references.pageInfo.hasNextPage) {
-    throw new Error(`This product has more than ${MAX_BATCHES} batches.`);
+    throw new PermanentLoadError(
+      `This product has more than ${MAX_BATCHES} batches.`,
+    );
   }
 
   return { shop: data.shop, product: data.product };
@@ -207,10 +225,7 @@ async function saveBatch(batch: PanelBatch): Promise<string> {
 
   // errors = the request itself failed; userErrors = Shopify rejected the values
   const result = data?.metaobjectUpsert;
-  const messages = [
-    ...(errors ?? []).map((error) => error.message),
-    ...(result?.userErrors ?? []).map((error) => error.message),
-  ];
+  const messages = collectErrorMessages(errors, result?.userErrors);
 
   if (messages.length > 0 || !result?.metaobject) {
     throw new Error(`Saving batch failed: ${messages.join("; ")}`);
@@ -273,11 +288,11 @@ async function saveProductFreshness(
     },
   );
 
-  const messages = [
-    ...(errors ?? []).map((error) => error.message),
-    ...(data?.metafieldsSet?.userErrors ?? []).map((error) => error.message),
-    ...(data?.metafieldsDelete?.userErrors ?? []).map((error) => error.message),
-  ];
+  const messages = collectErrorMessages(
+    errors,
+    data?.metafieldsSet?.userErrors,
+    data?.metafieldsDelete?.userErrors,
+  );
 
   if (messages.length > 0) {
     throw new Error(`Saving product freshness failed: ${messages.join("; ")}`);
@@ -303,10 +318,10 @@ async function deleteBatch(id: string): Promise<void> {
     { variables: { id } },
   );
 
-  const messages = [
-    ...(errors ?? []).map((error) => error.message),
-    ...(data?.metaobjectDelete?.userErrors ?? []).map((error) => error.message),
-  ];
+  const messages = collectErrorMessages(
+    errors,
+    data?.metaobjectDelete?.userErrors,
+  );
 
   if (messages.length > 0) {
     throw new Error(`Deleting batch failed: ${messages.join("; ")}`);
@@ -330,12 +345,44 @@ function getFreshness(
   }
 }
 
-function LoadError({ message }: { message: string }) {
+function LoadError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => Promise<void>;
+}) {
+  const [retrying, setRetrying] = useState(false);
+  // State updates on the next render, so a double-click could start two loads
+  const inFlight = useRef(false);
+
+  async function retry() {
+    if (!onRetry || inFlight.current) return;
+    inFlight.current = true;
+    setRetrying(true);
+    try {
+      await onRetry();
+    } finally {
+      // Only matters if the retry failed too; on success this is unmounted
+      inFlight.current = false;
+      setRetrying(false);
+    }
+  }
+
   return (
     <s-admin-block heading="Freshness batches">
       <s-banner heading="Batches couldn't be loaded" tone="critical">
-        <s-paragraph>{message}</s-paragraph>
-        <s-paragraph>Reload the page to try again.</s-paragraph>
+        {message}
+        {onRetry && (
+          <s-button
+            slot="secondary-actions"
+            variant="secondary"
+            loading={retrying}
+            onClick={retry}
+          >
+            Try again
+          </s-button>
+        )}
       </s-banner>
     </s-admin-block>
   );
