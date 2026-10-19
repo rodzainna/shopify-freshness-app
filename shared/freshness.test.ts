@@ -5,6 +5,7 @@ import {
   getShopToday,
   computeBatchFreshness,
   computeAggregateFreshness,
+  isInStock,
   formatDaysRemaining,
   getEarliestExpirationDate,
 } from "./freshness";
@@ -156,5 +157,29 @@ describe("getEarliestExpirationDate", () => {
         { quantity: 0, expirationDate: "2026-10-01" },
       ]),
     ).toBeNull();
+  });
+});
+
+describe("isInStock", () => {
+  it.each([
+    [1, true],
+    [12, true],
+    [0, false],
+    [-2, false],
+    [1.5, false],
+    [Number.NaN, false],
+  ])("is %s → %s", (quantity, expected) => {
+    expect(isInStock({ quantity, expirationDate: "2026-11-01" })).toBe(
+      expected,
+    );
+  });
+
+  it("is the rule the aggregate and earliest date both use", () => {
+    const batches = [
+      { quantity: 1.5, expirationDate: "2026-09-13" },
+      { quantity: 4, expirationDate: "2026-12-01" },
+    ];
+    expect(computeAggregateFreshness(batches, "2026-09-12")).toBe("Fresh");
+    expect(getEarliestExpirationDate(batches)).toBe("2026-12-01");
   });
 });
