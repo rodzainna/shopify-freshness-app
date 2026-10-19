@@ -7,6 +7,8 @@ import {
   getShopToday,
   type FreshnessStatus,
 } from "../../../shared/freshness";
+import { planProductMetafieldWrites } from "../../../shared/product-metafields";
+import { applySavedIds, failedItems } from "../../../shared/settled";
 import { render } from "preact";
 import { useState } from "preact/hooks";
 
@@ -167,51 +169,38 @@ interface UserErrorsPayload {
 }
 
 interface SaveProductFreshnessData {
-  metafieldsSet: UserErrorsPayload | null;
+  metafieldsSet?: UserErrorsPayload | null;
   metafieldsDelete?: UserErrorsPayload | null;
 }
 
 // Points the product at its saved batches and updates the date the storefront
-// reads. With nothing in stock there's no date to show, so it's deleted.
+// reads. See planProductMetafieldWrites for what gets set vs deleted.
 async function saveProductFreshness(
   productId: string,
   batchIds: string[],
   earliestExpirationDate: string | null,
 ): Promise<void> {
-  const metafields = [
-    {
-      ownerId: productId,
-      key: "freshness_batches",
-      value: JSON.stringify(batchIds),
-    },
-  ];
-
-  if (earliestExpirationDate) {
-    metafields.push({
-      ownerId: productId,
-      key: "earliest_expiration_date",
-      value: earliestExpirationDate,
-    });
-  }
+  const writes = planProductMetafieldWrites(
+    productId,
+    batchIds,
+    earliestExpirationDate,
+  );
 
   const { data, errors } = await shopify.query<SaveProductFreshnessData>(
     `
     mutation SaveProductFreshness(
-      $metafields: [MetafieldsSetInput!]!
-      $productId: ID!
-      $clearEarliest: Boolean!
+      $set: [MetafieldsSetInput!]!
+      $delete: [MetafieldIdentifierInput!]!
+      $hasSet: Boolean!
+      $hasDelete: Boolean!
     ) {
-      metafieldsSet(metafields: $metafields) {
+      metafieldsSet(metafields: $set) @include(if: $hasSet) {
         userErrors {
           field
           message
         }
       }
-      metafieldsDelete(
-        metafields: [
-          { ownerId: $productId, namespace: "$app", key: "earliest_expiration_date" }
-        ]
-      ) @include(if: $clearEarliest) {
+      metafieldsDelete(metafields: $delete) @include(if: $hasDelete) {
         userErrors {
           field
           message
@@ -221,9 +210,10 @@ async function saveProductFreshness(
   `,
     {
       variables: {
-        metafields,
-        productId,
-        clearEarliest: earliestExpirationDate === null,
+        set: writes.set,
+        delete: writes.delete,
+        hasSet: writes.set.length > 0,
+        hasDelete: writes.delete.length > 0,
       },
     },
   );
@@ -237,6 +227,39 @@ async function saveProductFreshness(
   if (messages.length > 0) {
     throw new Error(`Saving product freshness failed: ${messages.join("; ")}`);
   }
+}
+
+interface DeleteBatchData {
+  metaobjectDelete: UserErrorsPayload | null;
+}
+
+async function deleteBatch(id: string): Promise<void> {
+  const { data, errors } = await shopify.query<DeleteBatchData>(
+    `
+    mutation DeleteBatch($id: ID!) {
+      metaobjectDelete(id: $id) {
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `,
+    { variables: { id } },
+  );
+
+  const messages = [
+    ...(errors ?? []).map((error) => error.message),
+    ...(data?.metaobjectDelete?.userErrors ?? []).map((error) => error.message),
+  ];
+
+  if (messages.length > 0) {
+    throw new Error(`Deleting batch failed: ${messages.join("; ")}`);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function getFreshness(
@@ -265,19 +288,24 @@ function Extension({
 
   const [batches, setBatches] = useState<PanelBatch[]>(initialBatches);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<{
+    tone: "critical" | "warning";
+    heading: string;
+    message: string;
+  } | null>(null);
+  // Saved batches the merchant removed; their metaobjects go on the next save
+  const [removedIds, setRemovedIds] = useState<string[]>([]);
 
   async function saveBatches() {
     setSaving(true);
     setSaveError(null);
     try {
-      // Save all rows at once, then swap in the Shopify IDs we got back
-      const saved = await Promise.all(
-        batches.map(async (batch) => ({
-          ...batch,
-          id: await saveBatch(batch),
-        })),
-      );
+      // Rows that saved keep their Shopify ID even if another row failed,
+      // so removing one later still deletes its metaobject
+      const upserts = await Promise.allSettled(batches.map(saveBatch));
+      const { items: saved, errors } = applySavedIds(batches, upserts);
+      setBatches(saved);
+      if (errors.length > 0) throw errors[0];
 
       // Only link the batches once every one of them saved, so the product
       // never points at a batch that doesn't exist
@@ -286,9 +314,28 @@ function Extension({
         saved.map((batch) => batch.id),
         getEarliestExpirationDate(saved),
       );
-      setBatches(saved);
+
+      // Delete last, so a failure can't leave the product referencing a
+      // missing batch. Failed deletes stay queued for the next save.
+      const deletes = await Promise.allSettled(removedIds.map(deleteBatch));
+      setRemovedIds(failedItems(removedIds, deletes));
+
+      const firstFailure = deletes.find(
+        (result) => result.status === "rejected",
+      );
+      if (firstFailure) {
+        setSaveError({
+          tone: "warning",
+          heading: "Saved, but a removed batch wasn't deleted",
+          message: errorMessage(firstFailure.reason),
+        });
+      }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : String(error));
+      setSaveError({
+        tone: "critical",
+        heading: "Batches weren't saved",
+        message: errorMessage(error),
+      });
     } finally {
       setSaving(false);
     }
@@ -304,6 +351,13 @@ function Extension({
 
   function removeBatch(id: string) {
     setBatches((current) => current.filter((batch) => batch.id !== id));
+
+    // Rows that were never saved only exist locally; nothing to delete
+    if (id.startsWith("gid://")) {
+      setRemovedIds((current) =>
+        current.includes(id) ? current : [...current, id],
+      );
+    }
   }
 
   function addBatch() {
@@ -329,8 +383,8 @@ function Extension({
     >
       <s-stack direction="block" gap="base">
         {saveError && (
-          <s-banner heading="Batches weren't saved" tone="critical">
-            {saveError}
+          <s-banner heading={saveError.heading} tone={saveError.tone}>
+            {saveError.message}
           </s-banner>
         )}
         {batches.length > 0 && (
@@ -360,6 +414,7 @@ function Extension({
                       label="Quantity"
                       labelAccessibilityVisibility="exclusive"
                       value={String(batch.quantity)}
+                      disabled={saving}
                       onChange={(event) =>
                         updateBatch(batch.id, {
                           quantity: Number(event.currentTarget.value),
@@ -371,6 +426,7 @@ function Extension({
                       labelAccessibilityVisibility="exclusive"
                       value={batch.expirationDate}
                       required
+                      disabled={saving}
                       onChange={(event) =>
                         updateBatch(batch.id, {
                           expirationDate: event.currentTarget.value,
@@ -389,6 +445,7 @@ function Extension({
                       variant="tertiary"
                       tone="critical"
                       accessibilityLabel="Remove batch"
+                      disabled={saving}
                       onClick={() => removeBatch(batch.id)}
                     />
                   </s-grid>
@@ -398,13 +455,13 @@ function Extension({
           </s-query-container>
         )}
         <s-stack direction="inline" gap="base">
-          <s-button icon="plus" onClick={addBatch}>
+          <s-button icon="plus" disabled={saving} onClick={addBatch}>
             Add batch
           </s-button>
           <s-button
             variant="primary"
             loading={saving}
-            disabled={batches.length === 0}
+            disabled={batches.length === 0 && removedIds.length === 0}
             onClick={saveBatches}
           >
             Save
