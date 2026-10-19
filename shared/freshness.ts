@@ -111,7 +111,11 @@ export function computeAggregateFreshness(
   batches: Batch[],
   today: string,
 ): FreshnessStatus | "Not set" {
-  const activeBatches = batches.filter((batch) => batch.quantity > 0);
+  // Skips unreadable dates rather than throwing, so one bad batch can't
+  // break a whole page
+  const activeBatches = batches.filter(
+    (batch) => batch.quantity > 0 && isCalendarDate(batch.expirationDate),
+  );
 
   if (activeBatches.length === 0) {
     return "Not set";

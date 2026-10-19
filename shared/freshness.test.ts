@@ -62,6 +62,15 @@ describe("computeAggregateFreshness", () => {
     expect(result).toBe("Expired");
   });
 
+  it("skips batches whose date can't be read", () => {
+    const batches = [
+      { quantity: 2, expirationDate: "2026-02-30" },
+      { quantity: 4, expirationDate: "" },
+      { quantity: 10, expirationDate: "2030-01-01" },
+    ];
+    expect(computeAggregateFreshness(batches, today)).toBe("Fresh");
+  });
+
   it("returns 'Not set' when there are no active batches", () => {
     const batches: Batch[] = [];
     const result = computeAggregateFreshness(batches, today);

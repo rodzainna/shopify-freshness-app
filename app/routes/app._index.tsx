@@ -87,6 +87,7 @@ export default function Dashboard() {
         <s-table>
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
+            <s-table-header listSlot="secondary">Status</s-table-header>
             <s-table-header>Earliest expiry</s-table-header>
             <s-table-header>Batches</s-table-header>
           </s-table-header-row>
@@ -94,6 +95,17 @@ export default function Dashboard() {
             {rows.map((row) => (
               <s-table-row key={row.id}>
                 <s-table-cell>{row.title}</s-table-cell>
+                <s-table-cell>
+                  <s-badge
+                    tone={
+                      row.status === "Not set"
+                        ? undefined
+                        : FRESHNESS_TONE[row.status]
+                    }
+                  >
+                    {row.status}
+                  </s-badge>
+                </s-table-cell>
                 <s-table-cell>{row.earliestExpirationDate ?? "—"}</s-table-cell>
                 <s-table-cell>
                   <s-stack gap="small-200">
@@ -107,12 +119,18 @@ export default function Dashboard() {
                         <s-text>
                           {batch.quantity} × {batch.expirationDate || "no date"}
                         </s-text>
-                        {batch.freshness && (
-                          <s-badge
-                            tone={FRESHNESS_TONE[batch.freshness.status]}
-                          >
-                            {formatDaysRemaining(batch.freshness.daysRemaining)}
-                          </s-badge>
+                        {batch.quantity <= 0 ? (
+                          <s-badge>Sold out</s-badge>
+                        ) : (
+                          batch.freshness && (
+                            <s-badge
+                              tone={FRESHNESS_TONE[batch.freshness.status]}
+                            >
+                              {formatDaysRemaining(
+                                batch.freshness.daysRemaining,
+                              )}
+                            </s-badge>
+                          )
                         )}
                       </s-stack>
                     ))}
