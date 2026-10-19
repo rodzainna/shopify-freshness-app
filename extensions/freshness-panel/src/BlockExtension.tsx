@@ -5,7 +5,7 @@ import {
   computeBatchFreshness,
   getEarliestExpirationDate,
   getShopToday,
-  type FreshnessStatus,
+  FRESHNESS_TONE,
 } from "../../../shared/freshness";
 import {
   type ProductInventory,
@@ -160,13 +160,6 @@ interface FreshnessBatchNode {
 // status badge gets whatever is left and truncates. Accepted trade-off.
 const ROW_COLUMNS =
   "@container (inline-size > 600px) 10rem 14rem 1fr auto, 5rem 14rem 1fr auto";
-
-const STATUS_TONE: Record<FreshnessStatus, "success" | "warning" | "critical"> =
-  {
-    Fresh: "success",
-    "Use Soon": "warning",
-    Expired: "critical",
-  };
 
 function toPanelBatch(node: FreshnessBatchNode): PanelBatch {
   return {
@@ -570,7 +563,7 @@ function Extension({
                       }
                     />
                     {freshness ? (
-                      <s-badge tone={STATUS_TONE[freshness.status]}>
+                      <s-badge tone={FRESHNESS_TONE[freshness.status]}>
                         {formatDaysRemaining(freshness.daysRemaining)}
                       </s-badge>
                     ) : (
