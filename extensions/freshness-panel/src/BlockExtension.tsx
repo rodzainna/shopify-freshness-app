@@ -7,6 +7,11 @@ import {
   getShopToday,
   type FreshnessStatus,
 } from "../../../shared/freshness";
+import {
+  type ProductInventory,
+  formatInventoryMismatch,
+  getInventoryMismatch,
+} from "../../../shared/inventory";
 import { planProductMetafieldWrites } from "../../../shared/product-metafields";
 import { applySavedIds, failedItems } from "../../../shared/settled";
 import {
@@ -19,17 +24,19 @@ import { useState } from "preact/hooks";
 
 interface PanelData {
   shop: { ianaTimezone: string };
-  product: {
-    freshnessBatches: {
-      references: { nodes: FreshnessBatchNode[] };
-    } | null;
-  } | null;
+  product:
+    | (ProductInventory & {
+        freshnessBatches: {
+          references: { nodes: FreshnessBatchNode[] };
+        } | null;
+      })
+    | null;
 }
 
 export default async () => {
   const productId = shopify.data.selected[0].id;
 
-  // One request for both: the shop's timezone and the product's saved batches
+  // One request for the shop's timezone, the product's stock and its batches
   const { data } = await shopify.query<PanelData>(
     `
     query GetPanelData($productId: ID!) {
@@ -37,6 +44,8 @@ export default async () => {
         ianaTimezone
       }
       product(id: $productId) {
+        tracksInventory
+        totalInventory
         freshnessBatches: metafield(key: "freshness_batches") {
           references(first: 50) {
             nodes {
@@ -68,6 +77,7 @@ export default async () => {
       productId={productId}
       timezone={data?.shop.ianaTimezone ?? "UTC"}
       initialBatches={savedBatches}
+      inventory={data?.product ?? null}
     />,
     document.body,
   );
@@ -284,10 +294,12 @@ function Extension({
   productId,
   timezone,
   initialBatches,
+  inventory,
 }: {
   productId: string;
   timezone: string;
   initialBatches: PanelBatch[];
+  inventory: ProductInventory | null;
 }) {
   const today = getShopToday(timezone, new Date());
 
@@ -388,6 +400,8 @@ function Extension({
     ]);
   }
 
+  const mismatch = inventory && getInventoryMismatch(batches, inventory);
+
   return (
     <s-admin-block
       heading="Freshness batches"
@@ -397,6 +411,12 @@ function Extension({
         {saveError && (
           <s-banner heading={saveError.heading} tone={saveError.tone}>
             {saveError.message}
+          </s-banner>
+        )}
+        {mismatch && (
+          <s-banner heading="More in batches than in stock" tone="warning">
+            {formatInventoryMismatch(mismatch)} Check the quantities or update
+            the product inventory.
           </s-banner>
         )}
         {batches.length > 0 && (
