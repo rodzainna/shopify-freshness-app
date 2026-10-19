@@ -9,32 +9,75 @@ import {
 import { Fragment, render } from "preact";
 import { useState } from "preact/hooks";
 
+interface PanelData {
+  shop: { ianaTimezone: string };
+  product: {
+    freshnessBatches: {
+      references: { nodes: FreshnessBatchNode[] };
+    } | null;
+  } | null;
+}
+
 export default async () => {
-  const { data } = await shopify.query<{ shop: { ianaTimezone: string } }>(`
-    query GetShopTimezone {
+  const productId = shopify.data.selected[0].id;
+
+  // One request for both: the shop's timezone and the product's saved batches
+  const { data } = await shopify.query<PanelData>(
+    `
+    query GetPanelData($productId: ID!) {
       shop {
         ianaTimezone
       }
+      product(id: $productId) {
+        freshnessBatches: metafield(key: "freshness_batches") {
+          references(first: 50) {
+            nodes {
+              ... on Metaobject {
+                id
+                handle
+                quantity: field(key: "quantity") {
+                  value
+                }
+                expirationDate: field(key: "expiration_date") {
+                  value
+                }
+              }
+            }
+          }
+        }
+      }
     }
-  `);
+  `,
+    { variables: { productId } },
+  );
+
+  // No metafield yet (product never saved) -> start with an empty list
+  const savedBatches =
+    data?.product?.freshnessBatches?.references.nodes.map(toPanelBatch) ?? [];
 
   render(
-    <Extension timezone={data?.shop.ianaTimezone ?? "UTC"} />,
+    <Extension
+      timezone={data?.shop.ianaTimezone ?? "UTC"}
+      initialBatches={savedBatches}
+    />,
     document.body,
   );
 };
 
 interface PanelBatch {
   id: string;
+  // metaobjectUpsert finds the batch by this, so it must stay the same between saves
+  handle: string;
   quantity: number;
   expirationDate: string;
 }
 
-// interface FreshnessBatchNode {
-//   id: string;
-//   quantity: { value: string } | null;
-//   expirationDate: { value: string } | null;
-// }
+interface FreshnessBatchNode {
+  id: string;
+  handle: string;
+  quantity: { value: string } | null;
+  expirationDate: { value: string } | null;
+}
 
 // const MOCK_BATCHES: PanelBatch[] = [
 //   { id: "1", quantity: 12, expirationDate: "2026-09-14" },
@@ -54,13 +97,14 @@ const STATUS_TONE: Record<FreshnessStatus, "success" | "warning" | "critical"> =
     Expired: "critical",
   };
 
-// function toPanelBatch(node: FreshnessBatchNode): PanelBatch {
-//   return {
-//     id: node.id,
-//     quantity: Number(node.quantity?.value ?? 0),
-//     expirationDate: node.expirationDate?.value ?? ""
-//   };
-// }
+function toPanelBatch(node: FreshnessBatchNode): PanelBatch {
+  return {
+    id: node.id,
+    handle: node.handle,
+    quantity: Number(node.quantity?.value ?? 0),
+    expirationDate: node.expirationDate?.value ?? "",
+  };
+}
 
 function getFreshness(
   expirationDate: string,
@@ -75,12 +119,18 @@ function getFreshness(
   }
 }
 
-function Extension({ timezone }: { timezone: string }) {
+function Extension({
+  timezone,
+  initialBatches,
+}: {
+  timezone: string;
+  initialBatches: PanelBatch[];
+}) {
   const { data } = shopify;
   console.log({ data });
   const today = getShopToday(timezone, new Date());
 
-  const [batches, setBatches] = useState<PanelBatch[]>([]);
+  const [batches, setBatches] = useState<PanelBatch[]>(initialBatches);
 
   function updateBatch(id: string, changes: Partial<PanelBatch>) {
     setBatches((current) =>
@@ -95,10 +145,15 @@ function Extension({ timezone }: { timezone: string }) {
   }
 
   function addBatch() {
+    // Not saved yet, so there's no Shopify ID. The UUID is the local id and
+    // also becomes the handle Shopify stores the batch under on first save.
+    const uuid = crypto.randomUUID();
+
     setBatches((current) => [
       ...current,
       {
-        id: crypto.randomUUID(),
+        id: uuid,
+        handle: uuid,
         quantity: 0,
         expirationDate: "",
       },
