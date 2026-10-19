@@ -7,6 +7,7 @@ import {
   getShopToday,
   type FreshnessStatus,
 } from "../../../shared/freshness";
+import { planProductMetafieldWrites } from "../../../shared/product-metafields";
 import { render } from "preact";
 import { useState } from "preact/hooks";
 
@@ -167,51 +168,38 @@ interface UserErrorsPayload {
 }
 
 interface SaveProductFreshnessData {
-  metafieldsSet: UserErrorsPayload | null;
+  metafieldsSet?: UserErrorsPayload | null;
   metafieldsDelete?: UserErrorsPayload | null;
 }
 
 // Points the product at its saved batches and updates the date the storefront
-// reads. With nothing in stock there's no date to show, so it's deleted.
+// reads. See planProductMetafieldWrites for what gets set vs deleted.
 async function saveProductFreshness(
   productId: string,
   batchIds: string[],
   earliestExpirationDate: string | null,
 ): Promise<void> {
-  const metafields = [
-    {
-      ownerId: productId,
-      key: "freshness_batches",
-      value: JSON.stringify(batchIds),
-    },
-  ];
-
-  if (earliestExpirationDate) {
-    metafields.push({
-      ownerId: productId,
-      key: "earliest_expiration_date",
-      value: earliestExpirationDate,
-    });
-  }
+  const writes = planProductMetafieldWrites(
+    productId,
+    batchIds,
+    earliestExpirationDate,
+  );
 
   const { data, errors } = await shopify.query<SaveProductFreshnessData>(
     `
     mutation SaveProductFreshness(
-      $metafields: [MetafieldsSetInput!]!
-      $productId: ID!
-      $clearEarliest: Boolean!
+      $set: [MetafieldsSetInput!]!
+      $delete: [MetafieldIdentifierInput!]!
+      $hasSet: Boolean!
+      $hasDelete: Boolean!
     ) {
-      metafieldsSet(metafields: $metafields) {
+      metafieldsSet(metafields: $set) @include(if: $hasSet) {
         userErrors {
           field
           message
         }
       }
-      metafieldsDelete(
-        metafields: [
-          { ownerId: $productId, namespace: "$app", key: "earliest_expiration_date" }
-        ]
-      ) @include(if: $clearEarliest) {
+      metafieldsDelete(metafields: $delete) @include(if: $hasDelete) {
         userErrors {
           field
           message
@@ -221,9 +209,10 @@ async function saveProductFreshness(
   `,
     {
       variables: {
-        metafields,
-        productId,
-        clearEarliest: earliestExpirationDate === null,
+        set: writes.set,
+        delete: writes.delete,
+        hasSet: writes.set.length > 0,
+        hasDelete: writes.delete.length > 0,
       },
     },
   );
