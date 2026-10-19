@@ -228,6 +228,35 @@ async function saveProductFreshness(
   }
 }
 
+interface DeleteBatchData {
+  metaobjectDelete: UserErrorsPayload | null;
+}
+
+async function deleteBatch(id: string): Promise<void> {
+  const { data, errors } = await shopify.query<DeleteBatchData>(
+    `
+    mutation DeleteBatch($id: ID!) {
+      metaobjectDelete(id: $id) {
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `,
+    { variables: { id } },
+  );
+
+  const messages = [
+    ...(errors ?? []).map((error) => error.message),
+    ...(data?.metaobjectDelete?.userErrors ?? []).map((error) => error.message),
+  ];
+
+  if (messages.length > 0) {
+    throw new Error(`Deleting batch failed: ${messages.join("; ")}`);
+  }
+}
+
 function getFreshness(
   expirationDate: string,
   today: string,
@@ -255,6 +284,8 @@ function Extension({
   const [batches, setBatches] = useState<PanelBatch[]>(initialBatches);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Saved batches the merchant removed; their metaobjects go on the next save
+  const [removedIds, setRemovedIds] = useState<string[]>([]);
 
   async function saveBatches() {
     setSaving(true);
@@ -276,6 +307,19 @@ function Extension({
         getEarliestExpirationDate(saved),
       );
       setBatches(saved);
+
+      // Delete last, so a failure can't leave the product referencing a
+      // missing batch. Failed deletes stay queued for the next save.
+      const results = await Promise.allSettled(removedIds.map(deleteBatch));
+      const failed = results.flatMap((result, index) =>
+        result.status === "rejected" ? [removedIds[index]] : [],
+      );
+      setRemovedIds(failed);
+
+      const firstFailure = results.find(
+        (result) => result.status === "rejected",
+      );
+      if (firstFailure) throw firstFailure.reason;
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -293,6 +337,11 @@ function Extension({
 
   function removeBatch(id: string) {
     setBatches((current) => current.filter((batch) => batch.id !== id));
+
+    // Rows that were never saved only exist locally; nothing to delete
+    if (id.startsWith("gid://")) {
+      setRemovedIds((current) => [...current, id]);
+    }
   }
 
   function addBatch() {
@@ -393,7 +442,7 @@ function Extension({
           <s-button
             variant="primary"
             loading={saving}
-            disabled={batches.length === 0}
+            disabled={batches.length === 0 && removedIds.length === 0}
             onClick={saveBatches}
           >
             Save
