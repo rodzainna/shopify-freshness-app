@@ -12,6 +12,7 @@ import {
   formatInventoryMismatch,
   getInventoryMismatch,
 } from "../../../shared/inventory";
+import { collectErrorMessages } from "../../../shared/graphql-errors";
 import { planProductMetafieldWrites } from "../../../shared/product-metafields";
 import { applySavedIds, failedItems } from "../../../shared/settled";
 import {
@@ -109,7 +110,7 @@ async function loadPanelData(productId: string): Promise<LoadedPanelData> {
 
   // Partial data counts as a failure: a missing batch list would look empty
   if (errors?.length || !data?.product) {
-    const messages = (errors ?? []).map((error) => error.message);
+    const messages = collectErrorMessages(errors);
     throw new Error(
       messages.length > 0 ? messages.join("; ") : "Product not found",
     );
@@ -207,10 +208,7 @@ async function saveBatch(batch: PanelBatch): Promise<string> {
 
   // errors = the request itself failed; userErrors = Shopify rejected the values
   const result = data?.metaobjectUpsert;
-  const messages = [
-    ...(errors ?? []).map((error) => error.message),
-    ...(result?.userErrors ?? []).map((error) => error.message),
-  ];
+  const messages = collectErrorMessages(errors, result?.userErrors);
 
   if (messages.length > 0 || !result?.metaobject) {
     throw new Error(`Saving batch failed: ${messages.join("; ")}`);
@@ -273,11 +271,11 @@ async function saveProductFreshness(
     },
   );
 
-  const messages = [
-    ...(errors ?? []).map((error) => error.message),
-    ...(data?.metafieldsSet?.userErrors ?? []).map((error) => error.message),
-    ...(data?.metafieldsDelete?.userErrors ?? []).map((error) => error.message),
-  ];
+  const messages = collectErrorMessages(
+    errors,
+    data?.metafieldsSet?.userErrors,
+    data?.metafieldsDelete?.userErrors,
+  );
 
   if (messages.length > 0) {
     throw new Error(`Saving product freshness failed: ${messages.join("; ")}`);
@@ -303,10 +301,10 @@ async function deleteBatch(id: string): Promise<void> {
     { variables: { id } },
   );
 
-  const messages = [
-    ...(errors ?? []).map((error) => error.message),
-    ...(data?.metaobjectDelete?.userErrors ?? []).map((error) => error.message),
-  ];
+  const messages = collectErrorMessages(
+    errors,
+    data?.metaobjectDelete?.userErrors,
+  );
 
   if (messages.length > 0) {
     throw new Error(`Deleting batch failed: ${messages.join("; ")}`);
