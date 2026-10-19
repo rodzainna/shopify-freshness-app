@@ -3,6 +3,7 @@ import {
   type BatchFreshness,
   formatDaysRemaining,
   computeBatchFreshness,
+  getEarliestExpirationDate,
   getShopToday,
   type FreshnessStatus,
 } from "../../../shared/freshness";
@@ -57,6 +58,7 @@ export default async () => {
 
   render(
     <Extension
+      productId={productId}
       timezone={data?.shop.ianaTimezone ?? "UTC"}
       initialBatches={savedBatches}
     />,
@@ -166,6 +168,83 @@ async function saveBatch(batch: PanelBatch): Promise<string> {
   return result.metaobject.id;
 }
 
+interface UserErrorsPayload {
+  userErrors: { field: string[] | null; message: string }[];
+}
+
+interface SaveProductFreshnessData {
+  metafieldsSet: UserErrorsPayload | null;
+  metafieldsDelete?: UserErrorsPayload | null;
+}
+
+// Points the product at its saved batches and updates the date the storefront
+// reads. With nothing in stock there's no date to show, so it's deleted.
+async function saveProductFreshness(
+  productId: string,
+  batchIds: string[],
+  earliestExpirationDate: string | null,
+): Promise<void> {
+  const metafields = [
+    {
+      ownerId: productId,
+      key: "freshness_batches",
+      value: JSON.stringify(batchIds),
+    },
+  ];
+
+  if (earliestExpirationDate) {
+    metafields.push({
+      ownerId: productId,
+      key: "earliest_expiration_date",
+      value: earliestExpirationDate,
+    });
+  }
+
+  const { data, errors } = await shopify.query<SaveProductFreshnessData>(
+    `
+    mutation SaveProductFreshness(
+      $metafields: [MetafieldsSetInput!]!
+      $productId: ID!
+      $clearEarliest: Boolean!
+    ) {
+      metafieldsSet(metafields: $metafields) {
+        userErrors {
+          field
+          message
+        }
+      }
+      metafieldsDelete(
+        metafields: [
+          { ownerId: $productId, namespace: "$app", key: "earliest_expiration_date" }
+        ]
+      ) @include(if: $clearEarliest) {
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `,
+    {
+      variables: {
+        metafields,
+        productId,
+        clearEarliest: earliestExpirationDate === null,
+      },
+    },
+  );
+
+  const messages = [
+    ...(errors ?? []).map((error) => error.message),
+    ...(data?.metafieldsSet?.userErrors ?? []).map((error) => error.message),
+    ...(data?.metafieldsDelete?.userErrors ?? []).map((error) => error.message),
+  ];
+
+  if (messages.length > 0) {
+    throw new Error(`Saving product freshness failed: ${messages.join("; ")}`);
+  }
+}
+
 function getFreshness(
   expirationDate: string,
   today: string,
@@ -180,9 +259,11 @@ function getFreshness(
 }
 
 function Extension({
+  productId,
   timezone,
   initialBatches,
 }: {
+  productId: string;
   timezone: string;
   initialBatches: PanelBatch[];
 }) {
@@ -202,6 +283,14 @@ function Extension({
           ...batch,
           id: await saveBatch(batch),
         })),
+      );
+
+      // Only link the batches once every one of them saved, so the product
+      // never points at a batch that doesn't exist
+      await saveProductFreshness(
+        productId,
+        saved.map((batch) => batch.id),
+        getEarliestExpirationDate(saved),
       );
       setBatches(saved);
     } finally {
