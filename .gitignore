@@ -34,3 +34,10 @@ SPEC.md
 HANDOFF.md
 tasks/plan.md
 tasks/todo.md
+
+# Local editor and AI assistant config
+.cursor/
+.gemini/
+.mcp.json
+CLAUDE.md
+AGENTS.md
