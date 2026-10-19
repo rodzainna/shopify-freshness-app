@@ -1,5 +1,15 @@
 export type FreshnessStatus = "Fresh" | "Use Soon" | "Expired";
 
+// Badge tone for each status, shared by the panel and the dashboard
+export const FRESHNESS_TONE: Record<
+  FreshnessStatus,
+  "success" | "warning" | "critical"
+> = {
+  Fresh: "success",
+  "Use Soon": "warning",
+  Expired: "critical",
+};
+
 export interface BatchFreshness {
   status: FreshnessStatus;
   daysRemaining: number; // if today is Sep 13 and it expires Sep 15, it's 2 days
