@@ -106,6 +106,66 @@ function toPanelBatch(node: FreshnessBatchNode): PanelBatch {
   };
 }
 
+interface SaveBatchData {
+  metaobjectUpsert: {
+    metaobject: { id: string } | null;
+    userErrors: { field: string[] | null; message: string }[];
+  } | null;
+}
+
+// Creates the batch in Shopify, or updates it if its handle already exists.
+// Returns the batch's Shopify ID.
+async function saveBatch(batch: PanelBatch): Promise<string> {
+  const { data, errors } = await shopify.query<SaveBatchData>(
+    `
+    mutation SaveBatch(
+      $handle: String!
+      $quantity: String!
+      $expirationDate: String!
+    ) {
+      metaobjectUpsert(
+        handle: { type: "$app:freshness_batch", handle: $handle }
+        metaobject: {
+          fields: [
+            { key: "quantity", value: $quantity }
+            { key: "expiration_date", value: $expirationDate }
+          ]
+        }
+      ) {
+        metaobject {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `,
+    {
+      variables: {
+        handle: batch.handle,
+        // Metaobject field values are always sent as strings
+        quantity: String(batch.quantity),
+        expirationDate: batch.expirationDate,
+      },
+    },
+  );
+
+  // errors = the request itself failed; userErrors = Shopify rejected the values
+  const result = data?.metaobjectUpsert;
+  const messages = [
+    ...(errors ?? []).map((error) => error.message),
+    ...(result?.userErrors ?? []).map((error) => error.message),
+  ];
+
+  if (messages.length > 0 || !result?.metaobject) {
+    throw new Error(`Saving batch failed: ${messages.join("; ")}`);
+  }
+
+  return result.metaobject.id;
+}
+
 function getFreshness(
   expirationDate: string,
   today: string,
@@ -131,6 +191,23 @@ function Extension({
   const today = getShopToday(timezone, new Date());
 
   const [batches, setBatches] = useState<PanelBatch[]>(initialBatches);
+  const [saving, setSaving] = useState(false);
+
+  async function saveBatches() {
+    setSaving(true);
+    try {
+      // Save all rows at once, then swap in the Shopify IDs we got back
+      const saved = await Promise.all(
+        batches.map(async (batch) => ({
+          ...batch,
+          id: await saveBatch(batch),
+        })),
+      );
+      setBatches(saved);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function updateBatch(id: string, changes: Partial<PanelBatch>) {
     setBatches((current) =>
@@ -224,9 +301,19 @@ function Extension({
             </s-grid>
           </s-query-container>
         )}
-        <s-button icon="plus" onClick={addBatch}>
-          Add batch
-        </s-button>
+        <s-stack direction="inline" gap="base">
+          <s-button icon="plus" onClick={addBatch}>
+            Add batch
+          </s-button>
+          <s-button
+            variant="primary"
+            loading={saving}
+            disabled={batches.length === 0}
+            onClick={saveBatches}
+          >
+            Save
+          </s-button>
+        </s-stack>
       </s-stack>
     </s-admin-block>
   );
