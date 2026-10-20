@@ -6,6 +6,7 @@ EXPOSE 3000
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV DATABASE_URL=file:dev.sqlite
 
 COPY package.json package-lock.json* ./
 
