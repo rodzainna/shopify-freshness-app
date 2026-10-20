@@ -1,163 +1,117 @@
 # Shopify Freshness Tracker
 
-A small, scoped Shopify app being built as a portfolio piece to demonstrate custom Shopify app development — Admin UI extensions, token-exchange auth, webhooks, metafields/metaobjects, and order-driven inventory logic (FEFO batch decrement on fulfillment). Not a production product.
+An embedded Shopify app for stores that sell perishable goods. Merchants record stock in **batches**, each with a quantity and an expiration date, and see which products are fresh, close to expiry or expired. When an order is fulfilled, stock is meant to come out of the soonest-expiring batch first (**FEFO**, first expired, first out).
 
-**Planned functionality:** merchants track per-batch expiration dates on perishable products via an Admin extension, view a dashboard overview of freshness status across products, and have stock automatically decremented FEFO-style when an order is fulfilled.
+It's a portfolio project, built to show custom Shopify app work end to end. It runs on a development store only.
 
-**Current status:** in progress. Done so far: install/uninstall lifecycle (token exchange, webhook dedup, malformed-payload handling), the batch metaobject and product metafield definitions, shared freshness logic (unit-tested), and the product-page panel UI for batch rows. Next: saving batches to Shopify, then the dashboard and FEFO decrement on fulfillment.
+## Status
 
-**Privacy:** see [PRIVACY.md](PRIVACY.md) for the personal data the app processes and stores.
+| Area                                                    | State                                                            |
+| ------------------------------------------------------- | ---------------------------------------------------------------- |
+| Batch tracking on the product page                      | Done                                                             |
+| Freshness dashboard                                     | Done                                                             |
+| Fulfillment and compliance webhooks                     | Done: signature-verified; fulfillments deduplicated and recorded |
+| FEFO decrement, per-product lock and line-item grouping | Done as tested building blocks                                   |
+| Decrementing batches when an order is fulfilled         | In progress: the webhook handler doesn't call these yet          |
 
-Scaffolded from Shopify's official React Router app template — the rest of this README is template-level framework/setup documentation, trimmed to what's actually relevant to this project's stack (macOS, npm, SQLite, no MongoDB, no Windows).
+## Features
 
----
+**Product page panel** (Admin UI extension on the product details page)
 
-# Shopify App Template - React Router
+- Add, edit and remove batches, each with a quantity and an expiration date. Every row shows a live status badge.
+- Validation: quantity must be a whole number from 1 to 1,000,000,000, and the expiration date is required. Past dates are allowed, because expired stock exists until it's removed.
+- A non-blocking warning when the batches add up to more than the product's tracked inventory.
+- Load and save errors are shown in the panel, never silently swallowed. Most failed loads can be retried in place.
 
-This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/). It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
+**Dashboard** (the app's home page)
 
-This project has already been scaffolded from that template — the sections below are the template's own framework documentation, kept for reference; commands like `shopify app dev` are exactly what you'd run for this app too.
+- Each product's overall status, earliest expiry and a per-batch breakdown. Sold-out batches are marked as such. It shows the first 50 products by title and up to 10 batches each.
+- An empty state when the store has no products.
 
-Visit the [`shopify.dev` documentation](https://shopify.dev/docs/api/shopify-app-react-router) for more details on the React Router app package.
+**Privacy page** (`/app/privacy`)
 
-## Local Development
+- Renders [PRIVACY.md](PRIVACY.md) inside the admin. It's linked from the app nav and the dashboard.
+
+## How it works
+
+```
+Product page panel ──writes──▶ freshness_batch metaobjects (quantity, expiration_date)
+                               product metafields: freshness_batches (list of batches)
+                                                   earliest_expiration_date (readable in Liquid)
+Dashboard ──reads──▶ the same metaobjects and metafields through the Admin GraphQL API
+
+fulfillments/create webhook ─▶ verify HMAC ─▶ skip duplicates ─▶ group line items by product
+                            ─▶ per-product lock ─▶ FEFO decrement ─▶ write batches  (last four steps in progress)
+```
+
+**Freshness status is computed on every view, never stored.** It comes from each batch's expiration date and the shop's local "today":
+
+| Status   | Rule                           |
+| -------- | ------------------------------ |
+| Expired  | the expiration date has passed |
+| Use Soon | expires today or within 3 days |
+| Fresh    | otherwise                      |
+
+A product's status is that of its worst in-stock batch, or **Not set** when it has no in-stock batch with a date.
+
+## Key decisions
+
+- **Plain calendar dates.** Batches store `YYYY-MM-DD`. Days remaining is simple date subtraction in the shop's timezone, the way FEFO and inventory systems count it.
+- **Expired stock is never decremented.** FEFO skips expired batches, because packing teams shouldn't ship them. Anything that fresh stock can't cover is reported as a shortfall, never driven negative.
+- **A per-product lock** (Prisma, SQLite) serializes batch updates. Batches live in Shopify, not in the app's database, so a transaction can't protect them. The lock expires after 30 seconds, so a crashed holder frees it, and release only deletes the caller's own lock.
+- **`fulfillments/create`, not `orders/paid`.** Stock leaves on shipment, and partial fulfillments arrive as separate events. On a real partial fulfillment, the payload's `quantity` was the units shipped in that fulfillment.
+- **Minimal data access.** The scopes are `write_products`, `read_metaobjects` and `read_fulfillments`. The app requests no protected customer fields, which Shopify's docs say are then redacted from payloads, and it stores no customer data.
+- **Pure logic in `shared/`.** Freshness, FEFO, validation and grouping are pure functions with unit tests. Routes and the extension call them instead of re-implementing the rules.
+
+## Tech stack
+
+|                      |                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------- |
+| App framework        | React Router 7, `@shopify/shopify-app-react-router`                                          |
+| UI                   | Polaris web components, Preact (admin extension)                                             |
+| Data                 | Shopify metaobjects and metafields; Prisma with SQLite for sessions, webhook dedup and locks |
+| Shopify APIs         | Admin GraphQL API and webhooks, version 2026-07                                              |
+| Language and runtime | TypeScript (ES2024), Node.js 22.12 or newer                                                  |
+| Tests                | Vitest, against a separate SQLite test database                                              |
+
+## Project structure
+
+```
+app/
+  routes/        dashboard, privacy page, auth, webhook handlers
+  product-lock.server.ts
+  webhooks.server.ts
+extensions/
+  freshness-panel/   product page Admin UI extension
+shared/          pure, unit-tested logic used by the app and the extension
+prisma/          schema and migrations
+```
+
+## Running locally
+
+You need Node.js 22.12 or newer, a [Shopify Partner](https://www.shopify.com/partners) account and a development store.
 
 ```shell
-shopify app dev
+npm install
+echo 'DATABASE_URL="file:dev.sqlite"' > .env   # the CLI supplies the Shopify credentials
+npm run config:link               # connect the config to your own app
+npm run setup                     # generate the Prisma client and create the database
+npm run dev                       # start the app and tunnel through the Shopify CLI
 ```
 
-Press P to open the URL to your app. Once you click install, you can start development.
+Subscribing to `fulfillments/create` needs **protected customer data** access. Select it in your app's dashboard under API access requests, and complete the data protection details. No customer fields are needed.
 
-Local development is powered by [the Shopify CLI](https://shopify.dev/docs/apps/tools/cli). It logs into your account, connects to an app, provides environment variables, updates remote config, creates a tunnel and provides commands to generate extensions.
-
-## Authenticating and querying data
-
-To authenticate and query data you can use the `shopify` const that is exported from `/app/shopify.server.ts`:
-
-```js
-export async function loader({ request }) {
-  const { admin } = await shopify.authenticate.admin(request);
-
-  const response = await admin.graphql(`
-    {
-      products(first: 25) {
-        nodes {
-          title
-          description
-        }
-      }
-    }`);
-
-  const {
-    data: {
-      products: { nodes },
-    },
-  } = await response.json();
-
-  return nodes;
-}
-```
-
-> **Note for this project:** `app/routes/app._index.tsx` still contains the scaffold's demo product-generation code built on this pattern — its demo metafield/metaobject definitions were already trimmed from `shopify.app.toml`, so it likely errors if run as-is (not yet verified live). That whole route gets replaced by the real dashboard later in the build.
-
-Please read the [documentation for @shopify/shopify-app-react-router](https://shopify.dev/docs/api/shopify-app-react-router) to see what other API's are available.
-
-## Shopify Dev MCP
-
-This template is configured with the Shopify Dev MCP. This instructs [Cursor](https://cursor.com/), [GitHub Copilot](https://github.com/features/copilot) and [Claude Code](https://claude.com/product/claude-code) and [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) to use the Shopify Dev MCP.
-
-For more information on the Shopify Dev MCP please read [the documentation](https://shopify.dev/docs/apps/build/devmcp).
-
-## Deployment
-
-### Application Storage
-
-This template uses [Prisma](https://www.prisma.io/) to store session data, using an [SQLite](https://www.sqlite.org/index.html) database (defined in `prisma/schema.prisma`). SQLite works fine as long as the app runs as a single instance — which is the plan for this project (see Hosting below).
-
-### Build
+## Testing and quality
 
 ```shell
-npm run build
+npm test                # unit and integration tests
+npm run typecheck       # app types, including generated route types
+npm run typecheck:ext   # extension types
+npm run lint
 ```
 
-## Hosting
+Tests that touch the database recreate `prisma/test.sqlite` from the migrations on every run, so they never touch development data. Git hooks run lint-staged on commit, check commit messages against Conventional Commits, and run every check above (plus a format check) before a push.
 
-**For this project:** dev-store-only for v1 — no public deploy planned unless a live demo link is later needed for the portfolio. If that changes, see [Shopify's deployment documentation](https://shopify.dev/docs/apps/launch/deployment) for hosting options (Google Cloud Run has the most detailed React Router-specific tutorial).
+## Privacy
 
-## Gotchas / Troubleshooting
-
-### Database tables don't exist
-
-If you get an error like:
-
-```
-The table `main.Session` does not exist in the current database.
-```
-
-Create the database for Prisma. Run the `setup` script in `package.json` using `npm`.
-
-### Navigating/redirecting breaks an embedded app
-
-Embedded apps must maintain the user session, which can be tricky inside an iFrame. To avoid issues:
-
-1. Use `Link` from `react-router` or `@shopify/polaris`. Do not use `<a>`.
-2. Use `redirect` returned from `authenticate.admin`. Do not use `redirect` from `react-router`
-3. Use `useSubmit` from `react-router`.
-
-This only applies if your app is embedded, which it will be by default.
-
-### Webhooks: shop-specific webhook subscriptions aren't updated
-
-If you are registering webhooks in the `afterAuth` hook, using `shopify.registerWebhooks`, you may find that your subscriptions aren't being updated.
-
-Instead of using the `afterAuth` hook declare app-specific webhooks in the `shopify.app.toml` file. This approach is easier since Shopify will automatically sync changes every time you run `deploy` (e.g: `npm run deploy`). Please read these guides to understand more:
-
-1. [app-specific vs shop-specific webhooks](https://shopify.dev/docs/apps/build/webhooks/subscribe#app-specific-subscriptions)
-2. [Create a subscription tutorial](https://shopify.dev/docs/apps/build/webhooks/subscribe/get-started?deliveryMethod=https)
-
-If you do need shop-specific webhooks, keep in mind that the package calls `afterAuth` in 2 scenarios:
-
-- After installing the app
-- When an access token expires
-
-During normal development, the app won't need to re-authenticate most of the time, so shop-specific subscriptions aren't updated. To force your app to update the subscriptions, uninstall and reinstall the app. Revisiting the app will call the `afterAuth` hook.
-
-### Webhooks: Admin created webhook failing HMAC validation
-
-Webhooks subscriptions created in the [Shopify admin](https://help.shopify.com/en/manual/orders/notifications/webhooks) will fail HMAC validation. This is because the webhook payload is not signed with your app's secret key.
-
-The recommended solution is to use [app-specific webhooks](https://shopify.dev/docs/apps/build/webhooks/subscribe#app-specific-subscriptions) defined in your toml file instead. Test your webhooks by triggering events manually in the Shopify admin (e.g. Updating the product title to trigger a `PRODUCTS_UPDATE`).
-
-### Webhooks: Admin object undefined on webhook events triggered by the CLI
-
-When you trigger a webhook event using the Shopify CLI, the `admin` object will be `undefined`. This is because the CLI triggers an event with a valid, but non-existent, shop. The `admin` object is only available when the webhook is triggered by a shop that has installed the app. This is expected.
-
-Webhooks triggered by the CLI are intended for initial experimentation testing of your webhook configuration. For more information on how to test your webhooks, see the [Shopify CLI documentation](https://shopify.dev/docs/apps/tools/cli/commands#webhook-trigger).
-
-### Incorrect GraphQL Hints
-
-By default the [graphql.vscode-graphql](https://marketplace.visualstudio.com/items?itemName=GraphQL.vscode-graphql) extension will assume that GraphQL queries or mutations are for the [Shopify Admin API](https://shopify.dev/docs/api/admin). This is a sensible default, but it may not be true if:
-
-1. You use another Shopify API such as the storefront API.
-2. You use a third party GraphQL API.
-
-If so, please update [.graphqlrc.ts](https://github.com/Shopify/shopify-app-template-react-router/blob/main/.graphqlrc.ts).
-
-### "nbf" claim timestamp check failed
-
-This is because a JWT token is expired. If you are consistently getting this error, it could be that the clock on your machine is not in sync with the server. To fix this ensure you have enabled "Set time and date automatically" in the "Date and Time" settings on your computer.
-
-## Resources
-
-React Router:
-
-- [React Router docs](https://reactrouter.com/home)
-
-Shopify:
-
-- [Intro to Shopify apps](https://shopify.dev/docs/apps/getting-started)
-- [Shopify App React Router docs](https://shopify.dev/docs/api/shopify-app-react-router)
-- [Shopify CLI](https://shopify.dev/docs/apps/tools/cli)
-- [Shopify App Bridge](https://shopify.dev/docs/api/app-bridge-library)
-- [Polaris Web Components](https://shopify.dev/docs/api/app-home/polaris-web-components)
-- [App extensions](https://shopify.dev/docs/apps/app-extensions/list)
+[PRIVACY.md](PRIVACY.md) covers what the app receives and stores, retention and the data processing terms.
