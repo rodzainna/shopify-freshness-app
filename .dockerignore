@@ -4,3 +4,5 @@ node_modules
 # Secrets come from the host's environment, never baked into the image.
 .env
 .env.*
+# Local databases hold store sessions and access tokens.
+prisma/*.sqlite*
