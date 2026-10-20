@@ -1,3 +1,6 @@
 .cache
 build
 node_modules
+# Secrets come from the host's environment, never baked into the image.
+.env
+.env.*
