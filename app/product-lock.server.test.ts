@@ -26,6 +26,7 @@ async function clearTestLocks() {
 }
 beforeEach(clearTestLocks);
 afterEach(clearTestLocks);
+afterEach(() => vi.restoreAllMocks());
 
 describe("product lock", () => {
   it("acquires a free lock", async () => {
@@ -122,7 +123,6 @@ describe("withProductLock", () => {
       "done",
     );
     expect(logError).toHaveBeenCalledOnce();
-    logError.mockRestore();
   });
 
   it("throws ProductLockBusyError when the lock stays busy", async () => {
