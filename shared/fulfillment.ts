@@ -74,3 +74,16 @@ export function groupLineItemsByProduct(lineItems: unknown): {
     skipped,
   };
 }
+
+const FULFILLMENT_GID = /^gid:\/\/shopify\/Fulfillment\/\d+$/;
+
+// Prefers the payload's GID; Shopify's documented sample only has the numeric id.
+export function toFulfillmentGid(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const { admin_graphql_api_id: gid, id } = payload as Record<string, unknown>;
+  if (typeof gid === "string" && FULFILLMENT_GID.test(gid)) return gid;
+  if (typeof id === "number" && Number.isSafeInteger(id) && id > 0) {
+    return `gid://shopify/Fulfillment/${id}`;
+  }
+  return null;
+}

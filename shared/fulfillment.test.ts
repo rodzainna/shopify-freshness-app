@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupLineItemsByProduct } from "./fulfillment";
+import { groupLineItemsByProduct, toFulfillmentGid } from "./fulfillment";
 import { MAX_QUANTITY } from "./validation";
 
 // Shaped like a real fulfillments/create line item (extra fields omitted).
@@ -98,5 +98,41 @@ describe("groupLineItemsByProduct", () => {
     expect(skipped).toEqual([
       { index: 1, lineItemId: 2, reason: "no product" },
     ]);
+  });
+});
+
+describe("toFulfillmentGid", () => {
+  it("uses the payload's GID when it has one", () => {
+    expect(
+      toFulfillmentGid({
+        id: 1,
+        admin_graphql_api_id: "gid://shopify/Fulfillment/5512345678",
+      }),
+    ).toBe("gid://shopify/Fulfillment/5512345678");
+  });
+
+  it("builds the GID from the numeric id otherwise", () => {
+    expect(toFulfillmentGid({ id: 123456 })).toBe(
+      "gid://shopify/Fulfillment/123456",
+    );
+  });
+
+  it("ignores a GID for another resource", () => {
+    expect(
+      toFulfillmentGid({
+        id: 7,
+        admin_graphql_api_id: "gid://shopify/Order/7",
+      }),
+    ).toBe("gid://shopify/Fulfillment/7");
+  });
+
+  it.each([
+    ["no id", {}],
+    ["a string id", { id: "123" }],
+    ["an unsafe id", { id: Number.MAX_SAFE_INTEGER + 2 }],
+    ["a zero id", { id: 0 }],
+    ["no payload", null],
+  ])("returns null for %s", (_, payload) => {
+    expect(toFulfillmentGid(payload)).toBeNull();
   });
 });
