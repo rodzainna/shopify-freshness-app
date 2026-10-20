@@ -1,4 +1,5 @@
 import type { HeadersFunction } from "react-router";
+import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import privacyMarkdown from "../../PRIVACY.md?raw";
 import {
@@ -34,7 +35,8 @@ function toSections(blocks: Block[]) {
   return { title, sections };
 }
 
-const { title, sections } = toSections(parseMarkdown(privacyMarkdown));
+// Parsed on the server so the markdown and parser stay out of the client bundle.
+export const loader = () => toSections(parseMarkdown(privacyMarkdown));
 
 function InlineText({ content }: { content: Inline[] }) {
   return content.map((part, index) =>
@@ -64,6 +66,8 @@ function List({ items }: { items: ListItem[] }) {
 }
 
 export default function PrivacyPage() {
+  const { title, sections } = useLoaderData<typeof loader>();
+
   return (
     <s-page heading={title}>
       {sections.map((section, index) => (
