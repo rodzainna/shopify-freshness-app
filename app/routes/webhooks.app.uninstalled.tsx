@@ -22,6 +22,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (session) {
     await db.session.deleteMany({ where: { shop } });
   }
+  await db.productLock.deleteMany({ where: { shop } });
 
   await markWebhookProcessed(webhookId, topic);
 
