@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import db from "../db.server";
 import { action } from "./webhooks.fulfillments.create";
 
@@ -15,24 +15,40 @@ vi.mock("../webhooks.server", async (importOriginal) => ({
   })),
 }));
 
+const webhookId = "fulfillment-test-webhook";
+
+const deliver = () =>
+  action({
+    request: new Request("http://localhost/webhooks/fulfillments/create", {
+      method: "POST",
+    }),
+  } as Parameters<typeof action>[0]);
+
+async function clearTestWebhook() {
+  await db.processedWebhook.deleteMany({ where: { id: webhookId } });
+}
+
 describe("fulfillments/create webhook", () => {
+  beforeEach(clearTestWebhook);
+  afterEach(clearTestWebhook);
   afterEach(() => vi.restoreAllMocks());
 
-  it("acknowledges the webhook without marking it processed", async () => {
+  it("acknowledges the webhook and records it as processed", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
-    const response = await action({
-      request: new Request("http://localhost/webhooks/fulfillments/create", {
-        method: "POST",
-      }),
-    } as Parameters<typeof action>[0]);
-
-    expect(response.status).toBe(200);
-    // Redeliveries must still run once the decrement is added.
+    expect((await deliver()).status).toBe(200);
     expect(
-      await db.processedWebhook.findUnique({
-        where: { id: "fulfillment-test-webhook" },
-      }),
-    ).toBe(null);
+      await db.processedWebhook.findUnique({ where: { id: webhookId } }),
+    ).toEqual(expect.objectContaining({ topic: "FULFILLMENTS_CREATE" }));
+  });
+
+  it("skips a webhook it has already processed", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await deliver();
+    expect((await deliver()).status).toBe(200);
+    expect(log).toHaveBeenLastCalledWith(
+      `Duplicate FULFILLMENTS_CREATE webhook ${webhookId} for fulfillment-test.myshopify.com, skipping`,
+    );
   });
 });
