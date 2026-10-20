@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import db from "../db.server";
 import { action } from "./webhooks.app.uninstalled";
 
+vi.mock("../shopify.server", () => ({
+  authenticate: { webhook: vi.fn() },
+}));
+
 vi.mock("../webhooks.server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../webhooks.server")>()),
   authenticateWebhookSafely: vi.fn(async () => ({
