@@ -131,31 +131,10 @@ export async function applyPlan(
   plan: FulfillmentPlanData,
   earliestExpirationDate: string | null,
 ): Promise<void> {
-  for (const { id, after } of plan.updates) {
-    const data = await query<{
-      metaobjectUpdate: { userErrors: UserError[] } | null;
-    }>(
-      admin,
-      `#graphql
-        mutation SetBatchQuantity($id: ID!, $quantity: String!) {
-          metaobjectUpdate(
-            id: $id
-            metaobject: { fields: [{ key: "quantity", value: $quantity }] }
-          ) {
-            userErrors {
-              field
-              message
-              code
-            }
-          }
-        }`,
-      { id, quantity: String(after) },
-    );
-    throwOnUserErrors(
-      `Setting batch ${id} quantity`,
-      data.metaobjectUpdate?.userErrors,
-    );
-  }
+  // Writes within a step don't depend on each other, so they run together
+  await Promise.all(
+    plan.updates.map(({ id, after }) => setBatchQuantity(admin, id, after)),
+  );
 
   const freshness = await query<SaveProductFreshnessData>(
     admin,
@@ -172,30 +151,62 @@ export async function applyPlan(
     freshness.metafieldsDelete?.userErrors,
   );
 
-  for (const { id } of plan.deletes) {
-    const data = await query<{
-      metaobjectDelete: { userErrors: UserError[] } | null;
-    }>(
-      admin,
-      `#graphql
-        mutation DeleteBatch($id: ID!) {
-          metaobjectDelete(id: $id) {
-            deletedId
-            userErrors {
-              field
-              message
-              code
-            }
+  await Promise.all(plan.deletes.map(({ id }) => deleteBatch(admin, id)));
+}
+
+async function setBatchQuantity(
+  admin: AdminApiContext,
+  id: string,
+  quantity: number,
+): Promise<void> {
+  const data = await query<{
+    metaobjectUpdate: { userErrors: UserError[] } | null;
+  }>(
+    admin,
+    `#graphql
+      mutation SetBatchQuantity($id: ID!, $quantity: String!) {
+        metaobjectUpdate(
+          id: $id
+          metaobject: { fields: [{ key: "quantity", value: $quantity }] }
+        ) {
+          userErrors {
+            field
+            message
+            code
           }
-        }`,
-      { id },
-    );
-    // Already gone means an earlier attempt deleted it
-    const errors = data.metaobjectDelete?.userErrors.filter(
-      (error) => error.code !== "RECORD_NOT_FOUND",
-    );
-    throwOnUserErrors(`Deleting batch ${id}`, errors);
-  }
+        }
+      }`,
+    { id, quantity: String(quantity) },
+  );
+  throwOnUserErrors(
+    `Setting batch ${id} quantity`,
+    data.metaobjectUpdate?.userErrors,
+  );
+}
+
+async function deleteBatch(admin: AdminApiContext, id: string): Promise<void> {
+  const data = await query<{
+    metaobjectDelete: { userErrors: UserError[] } | null;
+  }>(
+    admin,
+    `#graphql
+      mutation DeleteBatch($id: ID!) {
+        metaobjectDelete(id: $id) {
+          deletedId
+          userErrors {
+            field
+            message
+            code
+          }
+        }
+      }`,
+    { id },
+  );
+  // Already gone means an earlier attempt deleted it
+  const errors = data.metaobjectDelete?.userErrors.filter(
+    (error) => error.code !== "RECORD_NOT_FOUND",
+  );
+  throwOnUserErrors(`Deleting batch ${id}`, errors);
 }
 
 function throwOnUserErrors(

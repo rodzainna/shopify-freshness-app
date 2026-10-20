@@ -181,6 +181,88 @@ describe("applyPlan", () => {
     ]);
   });
 
+  it("writes every quantity before the list, and the list before deletes", async () => {
+    const { admin, calls } = fakeAdmin(writesSucceed);
+    const wider: FulfillmentPlanData = {
+      ...plan,
+      updates: [
+        { id: "gid://shopify/Metaobject/2", before: 10, after: 8 },
+        { id: "gid://shopify/Metaobject/3", before: 4, after: 1 },
+      ],
+      deletes: [
+        { id: "gid://shopify/Metaobject/1", before: 3 },
+        { id: "gid://shopify/Metaobject/4", before: 2 },
+      ],
+    };
+
+    await applyPlan(admin, productId, wider, null);
+
+    expect(calls.map(({ operation }) => operation)).toStrictEqual([
+      "SetBatchQuantity",
+      "SetBatchQuantity",
+      "SaveProductFreshness",
+      "DeleteBatch",
+      "DeleteBatch",
+    ]);
+  });
+
+  it("sends a step's writes together, not one after another", async () => {
+    let inFlight = 0;
+    let mostInFlight = 0;
+    const admin = {
+      graphql: async (query: string) => {
+        inFlight += 1;
+        mostInFlight = Math.max(mostInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        const data = query.includes("SetBatchQuantity")
+          ? { metaobjectUpdate: noUserErrors }
+          : { metafieldsSet: noUserErrors };
+        return Response.json({ data });
+      },
+    } as unknown as AdminApiContext;
+    const twoUpdates: FulfillmentPlanData = {
+      ...plan,
+      updates: [
+        { id: "gid://shopify/Metaobject/2", before: 10, after: 8 },
+        { id: "gid://shopify/Metaobject/3", before: 4, after: 1 },
+      ],
+      deletes: [],
+    };
+
+    await applyPlan(admin, productId, twoUpdates, null);
+
+    expect(mostInFlight).toBe(2);
+  });
+
+  it("doesn't write the list when any quantity is rejected", async () => {
+    const { admin, calls } = fakeAdmin({
+      ...writesSucceed,
+      SetBatchQuantity: ({ id }: { id: string }) => ({
+        metaobjectUpdate: {
+          userErrors:
+            id === "gid://shopify/Metaobject/3"
+              ? [{ message: "Invalid value", code: "INVALID" }]
+              : [],
+        },
+      }),
+    });
+    const twoUpdates: FulfillmentPlanData = {
+      ...plan,
+      updates: [
+        { id: "gid://shopify/Metaobject/2", before: 10, after: 8 },
+        { id: "gid://shopify/Metaobject/3", before: 4, after: 1 },
+      ],
+    };
+
+    await expect(applyPlan(admin, productId, twoUpdates, null)).rejects.toThrow(
+      "Setting batch gid://shopify/Metaobject/3 quantity failed: Invalid value",
+    );
+    expect(calls.map(({ operation }) => operation)).not.toContain(
+      "SaveProductFreshness",
+    );
+  });
+
   it("writes the date it's given, not the plan's", async () => {
     const { admin, calls } = fakeAdmin(writesSucceed);
 
