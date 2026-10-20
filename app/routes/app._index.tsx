@@ -97,6 +97,7 @@ export default function Dashboard() {
             </s-button>
           </s-stack>
         </s-section>
+        <PrivacyLink />
       </s-page>
     );
   }
@@ -171,7 +172,16 @@ export default function Dashboard() {
           Showing the first {PRODUCT_LIMIT} products by title.
         </s-paragraph>
       )}
+      <PrivacyLink />
     </s-page>
+  );
+}
+
+function PrivacyLink() {
+  return (
+    <s-paragraph color="subdued">
+      <s-link href="/app/privacy">Privacy and data terms</s-link>
+    </s-paragraph>
   );
 }
 
