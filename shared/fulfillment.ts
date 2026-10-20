@@ -1,3 +1,5 @@
+import { toProductGid } from "./product-gid";
+
 export type ProductQuantity = { productId: string; quantity: number };
 
 export type SkippedLineItem = {
@@ -41,7 +43,7 @@ export function groupLineItemsByProduct(lineItems: unknown[]): {
     } else if (!Number.isInteger(quantity) || (quantity as number) <= 0) {
       skipped.push({ lineItemId: id, reason: "invalid quantity" });
     } else {
-      const gid = `gid://shopify/Product/${productId}`;
+      const gid = toProductGid(productId as number);
       totals.set(gid, (totals.get(gid) ?? 0) + (quantity as number));
     }
   }
