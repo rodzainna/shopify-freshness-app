@@ -92,17 +92,15 @@ describe("readProductBatches", () => {
     expect(calls[0].variables).toStrictEqual({ productId, maxBatches: 250 });
   });
 
-  it("treats a missing quantity as not in stock", async () => {
+  it("reads a missing quantity as 0, like the panel", async () => {
     const { admin } = fakeAdmin({
       GetProductBatches: () =>
         batchesResponse([{ id: "gid://shopify/Metaobject/1", quantity: null }]),
     });
 
-    const result = await readProductBatches(admin, productId);
-
-    expect(result).toStrictEqual({
+    expect(await readProductBatches(admin, productId)).toStrictEqual({
       batches: [
-        { id: "gid://shopify/Metaobject/1", quantity: NaN, expirationDate: "" },
+        { id: "gid://shopify/Metaobject/1", quantity: 0, expirationDate: "" },
       ],
     });
   });

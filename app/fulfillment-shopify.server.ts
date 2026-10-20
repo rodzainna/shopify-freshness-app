@@ -108,7 +108,7 @@ export async function readProductBatches(
         ? [
             {
               id: node.id,
-              quantity: Number(node.quantity?.value),
+              quantity: Number(node.quantity?.value ?? 0),
               expirationDate: node.expirationDate?.value ?? "",
             },
           ]
