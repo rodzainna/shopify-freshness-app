@@ -107,9 +107,13 @@ export function computeBatchFreshness(
   return { status, daysRemaining };
 }
 
+export function isPositiveWholeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 // One definition of stock for every freshness calculation
 export function isInStock(batch: Batch): boolean {
-  return Number.isInteger(batch.quantity) && batch.quantity > 0;
+  return isPositiveWholeNumber(batch.quantity);
 }
 
 export function computeAggregateFreshness(

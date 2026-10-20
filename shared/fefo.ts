@@ -3,6 +3,7 @@ import {
   computeBatchFreshness,
   isCalendarDate,
   isInStock,
+  isPositiveWholeNumber,
 } from "./freshness";
 
 export interface FefoResult<T extends Batch> {
@@ -36,7 +37,7 @@ export function decrementFefo<T extends Batch>(
   if (!isCalendarDate(today)) {
     throw new Error(`Expected today as YYYY-MM-DD, got: "${today}"`);
   }
-  if (!Number.isInteger(quantity) || quantity <= 0) {
+  if (!isPositiveWholeNumber(quantity)) {
     return { remaining: [...batches], updated: [], emptied: [], shortfall: 0 };
   }
 
