@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 
-import { planProductMetafieldWrites } from "./product-metafields";
+import {
+  planProductMetafieldWrites,
+  saveProductFreshnessVariables,
+} from "./product-metafields";
 
 describe("planProductMetafieldWrites", () => {
   const productId = "gid://shopify/Product/1";
@@ -59,5 +62,24 @@ describe("planProductMetafieldWrites", () => {
         },
       ],
     });
+  });
+});
+
+describe("saveProductFreshnessVariables", () => {
+  const productId = "gid://shopify/Product/1";
+
+  it("includes only the mutations that have writes", () => {
+    expect(saveProductFreshnessVariables(productId, [], null)).toMatchObject({
+      set: [],
+      hasSet: false,
+      hasDelete: true,
+    });
+    expect(
+      saveProductFreshnessVariables(
+        productId,
+        ["gid://shopify/Metaobject/1"],
+        "2026-10-22",
+      ),
+    ).toMatchObject({ delete: [], hasSet: true, hasDelete: false });
   });
 });

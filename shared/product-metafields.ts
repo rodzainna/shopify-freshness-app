@@ -50,3 +50,53 @@ export function planProductMetafieldWrites(
 
   return { set, delete: toDelete };
 }
+
+// Shared by the panel and the fulfillment webhook, so both write identically.
+export const SAVE_PRODUCT_FRESHNESS_MUTATION = `
+  mutation SaveProductFreshness(
+    $set: [MetafieldsSetInput!]!
+    $delete: [MetafieldIdentifierInput!]!
+    $hasSet: Boolean!
+    $hasDelete: Boolean!
+  ) {
+    metafieldsSet(metafields: $set) @include(if: $hasSet) {
+      userErrors {
+        field
+        message
+      }
+    }
+    metafieldsDelete(metafields: $delete) @include(if: $hasDelete) {
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+interface UserErrorsPayload {
+  userErrors: { field: string[] | null; message: string }[];
+}
+
+export interface SaveProductFreshnessData {
+  metafieldsSet?: UserErrorsPayload | null;
+  metafieldsDelete?: UserErrorsPayload | null;
+}
+
+export function saveProductFreshnessVariables(
+  productId: string,
+  batchIds: string[],
+  earliestExpirationDate: string | null,
+) {
+  const writes = planProductMetafieldWrites(
+    productId,
+    batchIds,
+    earliestExpirationDate,
+  );
+  return {
+    set: writes.set,
+    delete: writes.delete,
+    hasSet: writes.set.length > 0,
+    hasDelete: writes.delete.length > 0,
+  };
+}
