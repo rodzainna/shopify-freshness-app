@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 
-import { checkPlanBeforeRetry, planFulfillment } from "./fulfillment-plan";
+import {
+  checkPlanBeforeRetry,
+  earliestDateAfterPlan,
+  planFulfillment,
+} from "./fulfillment-plan";
 
 const TODAY = "2026-10-20";
 
@@ -151,5 +155,37 @@ describe("checkPlanBeforeRetry", () => {
 
   it("ignores a repeated id, as the plan did", () => {
     expect(checkPlanBeforeRetry(plan, [SOON, SOON, LATER])).toBe("safe");
+  });
+});
+
+describe("earliestDateAfterPlan", () => {
+  const NEXT = batch("next", 2, "2026-11-01");
+  // Takes 3: "soon" is emptied; "next" and "later" are untouched
+  const { plan } = planFulfillment([SOON, NEXT, LATER], 3, TODAY);
+
+  it("matches the plan's date when nothing changed", () => {
+    expect(earliestDateAfterPlan(plan, [SOON, NEXT, LATER])).toBe(
+      plan.earliestExpirationDate,
+    );
+  });
+
+  it("is the same whether or not the plan was partly applied", () => {
+    expect(earliestDateAfterPlan(plan, [NEXT, LATER])).toBe("2026-11-01");
+  });
+
+  it("skips an untouched batch that was sold out in the meantime", () => {
+    const soldOut = batch("next", 0, "2026-11-01");
+
+    expect(earliestDateAfterPlan(plan, [SOON, soldOut, LATER])).toBe(
+      "2026-11-05",
+    );
+  });
+
+  it("uses an untouched batch's edited date", () => {
+    const redated = batch("next", 2, "2026-12-01");
+
+    expect(earliestDateAfterPlan(plan, [SOON, redated, LATER])).toBe(
+      "2026-11-05",
+    );
   });
 });

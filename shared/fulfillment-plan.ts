@@ -116,6 +116,22 @@ export function checkPlanBeforeRetry(
   return updatesOk && deletesOk ? "safe" : "changed";
 }
 
+/**
+ * The earliest date once the plan is applied to the batches as they are now.
+ * On a retry this includes edits the plan's saved date can't know about.
+ *
+ * @param current - the product's batches as just re-read from Shopify
+ */
+export function earliestDateAfterPlan(
+  plan: FulfillmentPlanData,
+  current: StoredBatch[],
+): string | null {
+  // Decremented batches stay in stock, so their new quantities can't change it
+  const byId = new Map(current.map((batch) => [batch.id, batch]));
+  const remaining = plan.batchIds.flatMap((id) => byId.get(id) ?? []);
+  return getEarliestExpirationDate(remaining);
+}
+
 function sameIds(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
