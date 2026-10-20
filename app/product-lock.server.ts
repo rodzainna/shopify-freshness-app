@@ -85,8 +85,22 @@ export async function withProductLock<T>(
   try {
     return await fn();
   } finally {
+    await releaseAfterWork(shop, productId, token);
+  }
+}
+
+// fn's writes have already happened, so a failed release must not report them
+// as failed (a redelivered webhook would apply them twice); the TTL frees it.
+async function releaseAfterWork(
+  shop: string,
+  productId: string,
+  token: string,
+) {
+  try {
     if (!(await releaseProductLock(shop, productId, token))) {
       console.warn(`Lock on ${productId} for ${shop} expired before release`);
     }
+  } catch (error) {
+    console.error(`Failed to release lock on ${productId} for ${shop}`, error);
   }
 }

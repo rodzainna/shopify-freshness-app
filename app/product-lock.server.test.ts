@@ -112,6 +112,19 @@ describe("withProductLock", () => {
     expect(await acquireProductLock(shop, productId)).not.toBe(null);
   });
 
+  it("keeps the work's result when releasing the lock fails", async () => {
+    vi.spyOn(db.productLock, "deleteMany").mockRejectedValueOnce(
+      new Error("database is locked"),
+    );
+    const logError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(await withProductLock(shop, productId, async () => "done")).toBe(
+      "done",
+    );
+    expect(logError).toHaveBeenCalledOnce();
+    logError.mockRestore();
+  });
+
   it("throws ProductLockBusyError when the lock stays busy", async () => {
     await holdLock(new Date());
     const work = vi.fn(async () => {});
