@@ -111,6 +111,14 @@ export function isPositiveWholeNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+// FEFO never takes from these; an unreadable date can't be judged expired
+export function isExpired(batch: Batch, today: string): boolean {
+  return (
+    isCalendarDate(batch.expirationDate) &&
+    computeBatchFreshness(batch.expirationDate, today).status === "Expired"
+  );
+}
+
 // One definition of stock for every freshness calculation
 export function isInStock(batch: Batch): boolean {
   return isPositiveWholeNumber(batch.quantity);

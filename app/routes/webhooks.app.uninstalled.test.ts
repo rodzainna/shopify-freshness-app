@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import db from "../db.server";
 import { action } from "./webhooks.app.uninstalled";
+import {
+  clearShopData,
+  seedShopData,
+  shopsWithData,
+} from "../../test/shop-data";
 
 vi.mock("../shopify.server", () => ({
   authenticate: { webhook: vi.fn() },
@@ -18,40 +23,37 @@ vi.mock("../webhooks.server", async (importOriginal) => ({
 
 const shop = "uninstall-test.myshopify.com";
 const otherShop = "uninstall-other.myshopify.com";
-const testShops = { shop: { in: [shop, otherShop] } };
+const shops = [shop, otherShop];
+const webhookId = "uninstall-test-webhook";
 
 async function clearTestData() {
-  await db.productLock.deleteMany({ where: testShops });
-  await db.processedWebhook.deleteMany({
-    where: { id: "uninstall-test-webhook" },
-  });
+  await clearShopData(shops);
+  await db.processedWebhook.deleteMany({ where: { id: webhookId } });
 }
 
 describe("app/uninstalled webhook", () => {
-  beforeEach(clearTestData);
+  beforeEach(async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await clearTestData();
+    await seedShopData(shop);
+    await seedShopData(otherShop);
+  });
   afterEach(clearTestData);
+  afterEach(() => vi.restoreAllMocks());
 
-  it("deletes the shop's product locks, even with no session left", async () => {
-    const lock = {
-      productId: "gid://shopify/Product/1",
-      token: "t",
-      expiresAt: new Date(),
-    };
-    await db.productLock.createMany({
-      data: [
-        { ...lock, shop },
-        { ...lock, shop: otherShop },
-      ],
-    });
-
-    await action({
+  it("deletes the shop's sessions, locks and plans, keeping discrepancies", async () => {
+    const response = await action({
       request: new Request("http://localhost/webhooks/app/uninstalled", {
         method: "POST",
       }),
     } as Parameters<typeof action>[0]);
 
-    expect(await db.productLock.findMany({ where: testShops })).toEqual([
-      expect.objectContaining({ shop: otherShop }),
-    ]);
+    expect(response.status).toBe(200);
+    expect(await shopsWithData(shops)).toEqual({
+      sessions: [otherShop],
+      locks: [otherShop],
+      plans: [otherShop],
+      discrepancies: shops.toSorted(),
+    });
   });
 });

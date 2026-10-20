@@ -50,3 +50,61 @@ export function planProductMetafieldWrites(
 
   return { set, delete: toDelete };
 }
+
+// Shopify's largest page size; the app loads a product's batches in one request
+export const MAX_BATCHES = 250;
+
+// Shared by the panel and the fulfillment webhook, so both write identically.
+export const SAVE_PRODUCT_FRESHNESS_MUTATION = `#graphql
+  mutation SaveProductFreshness(
+    $set: [MetafieldsSetInput!]!
+    $delete: [MetafieldIdentifierInput!]!
+    $hasSet: Boolean!
+    $hasDelete: Boolean!
+  ) {
+    metafieldsSet(metafields: $set) @include(if: $hasSet) {
+      userErrors {
+        field
+        message
+      }
+    }
+    metafieldsDelete(metafields: $delete) @include(if: $hasDelete) {
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+// `code` is only present when the operation selects it
+export interface UserErrorsPayload {
+  userErrors: {
+    field: string[] | null;
+    message: string;
+    code?: string | null;
+  }[];
+}
+
+export interface SaveProductFreshnessData {
+  metafieldsSet?: UserErrorsPayload | null;
+  metafieldsDelete?: UserErrorsPayload | null;
+}
+
+export function saveProductFreshnessVariables(
+  productId: string,
+  batchIds: string[],
+  earliestExpirationDate: string | null,
+) {
+  const writes = planProductMetafieldWrites(
+    productId,
+    batchIds,
+    earliestExpirationDate,
+  );
+  return {
+    set: writes.set,
+    delete: writes.delete,
+    hasSet: writes.set.length > 0,
+    hasDelete: writes.delete.length > 0,
+  };
+}

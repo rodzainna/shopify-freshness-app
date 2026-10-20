@@ -9,8 +9,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   console.log(`Received ${topic} webhook for ${shop}`);
 
   if (topic === "SHOP_REDACT") {
-    await db.session.deleteMany({ where: { shop } });
-    await db.productLock.deleteMany({ where: { shop } });
+    const where = { shop };
+    await db.$transaction([
+      db.session.deleteMany({ where }),
+      db.productLock.deleteMany({ where }),
+      db.fulfillmentPlan.deleteMany({ where }),
+      db.fulfillmentDiscrepancy.deleteMany({ where }),
+    ]);
   }
 
   return new Response();

@@ -7,8 +7,7 @@ import {
 } from "../webhooks.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, session, topic, webhookId } =
-    await authenticateWebhookSafely(request);
+  const { shop, topic, webhookId } = await authenticateWebhookSafely(request);
 
   if (await isDuplicateWebhook(webhookId)) {
     console.log(
@@ -19,10 +18,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
-  if (session) {
-    await db.session.deleteMany({ where: { shop } });
-  }
-  await db.productLock.deleteMany({ where: { shop } });
+  // Discrepancies are kept until shop/redact, so a quick reinstall keeps them.
+  const where = { shop };
+  await db.$transaction([
+    db.session.deleteMany({ where }),
+    db.productLock.deleteMany({ where }),
+    db.fulfillmentPlan.deleteMany({ where }),
+  ]);
 
   await markWebhookProcessed(webhookId, topic);
 

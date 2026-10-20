@@ -13,7 +13,13 @@ import {
   getInventoryMismatch,
 } from "../../../shared/inventory";
 import { collectErrorMessages } from "../../../shared/graphql-errors";
-import { planProductMetafieldWrites } from "../../../shared/product-metafields";
+import {
+  MAX_BATCHES,
+  SAVE_PRODUCT_FRESHNESS_MUTATION,
+  type SaveProductFreshnessData,
+  type UserErrorsPayload,
+  saveProductFreshnessVariables,
+} from "../../../shared/product-metafields";
 import { applySavedIds, failedItems } from "../../../shared/settled";
 import {
   MAX_QUANTITY,
@@ -41,9 +47,6 @@ interface LoadedPanelData {
   shop: PanelData["shop"];
   product: PanelProduct;
 }
-
-// Shopify's largest page size; the panel loads every batch in one request
-const MAX_BATCHES = 250;
 
 export default async () => {
   await mountPanel(shopify.data.selected[0].id);
@@ -227,15 +230,6 @@ async function saveBatch(batch: PanelBatch): Promise<string> {
   return result.metaobject.id;
 }
 
-interface UserErrorsPayload {
-  userErrors: { field: string[] | null; message: string }[];
-}
-
-interface SaveProductFreshnessData {
-  metafieldsSet?: UserErrorsPayload | null;
-  metafieldsDelete?: UserErrorsPayload | null;
-}
-
 // Points the product at its saved batches and updates the date the storefront
 // reads. See planProductMetafieldWrites for what gets set vs deleted.
 async function saveProductFreshness(
@@ -243,41 +237,14 @@ async function saveProductFreshness(
   batchIds: string[],
   earliestExpirationDate: string | null,
 ): Promise<void> {
-  const writes = planProductMetafieldWrites(
-    productId,
-    batchIds,
-    earliestExpirationDate,
-  );
-
   const { data, errors } = await shopify.query<SaveProductFreshnessData>(
-    `
-    mutation SaveProductFreshness(
-      $set: [MetafieldsSetInput!]!
-      $delete: [MetafieldIdentifierInput!]!
-      $hasSet: Boolean!
-      $hasDelete: Boolean!
-    ) {
-      metafieldsSet(metafields: $set) @include(if: $hasSet) {
-        userErrors {
-          field
-          message
-        }
-      }
-      metafieldsDelete(metafields: $delete) @include(if: $hasDelete) {
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `,
+    SAVE_PRODUCT_FRESHNESS_MUTATION,
     {
-      variables: {
-        set: writes.set,
-        delete: writes.delete,
-        hasSet: writes.set.length > 0,
-        hasDelete: writes.delete.length > 0,
-      },
+      variables: saveProductFreshnessVariables(
+        productId,
+        batchIds,
+        earliestExpirationDate,
+      ),
     },
   );
 
