@@ -81,6 +81,7 @@ model FulfillmentDiscrepancy {
   expiredUnits  Int?
   createdAt     DateTime          @default(now())
 
-  @@id([shop, fulfillmentId, productId])
+  // One row per reason: a shortfall and a later retry conflict can both apply
+  @@id([shop, fulfillmentId, productId, reason])
   @@index([shop, createdAt])
 }
