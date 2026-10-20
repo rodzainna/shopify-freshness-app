@@ -50,12 +50,16 @@ export function parseMarkdown(source: string): Block[] {
     }
   };
 
-  for (const line of source.split("\n")) {
+  // Raw text of the item a continuation line would extend.
+  let openItem: { entry: ListItem; raw: string } | null = null;
+
+  for (const line of source.split(/\r?\n/)) {
     const heading = line.match(/^(#{1,2}) (.+)$/);
     const item = line.match(/^( *)- (.+)$/);
 
     if (heading) {
       flushParagraph();
+      openItem = null;
       blocks.push({
         kind: "heading",
         level: heading[1].length as 1 | 2,
@@ -64,8 +68,9 @@ export function parseMarkdown(source: string): Block[] {
     } else if (item) {
       flushParagraph();
       const entry: ListItem = { content: parseInline(item[2]), children: [] };
+      openItem = { entry, raw: item[2] };
       const last = blocks.at(-1);
-      // Two-space indent nests under the previous item, as in PRIVACY.md.
+      // Any indent nests one level under the previous item; deeper levels aren't supported.
       if (item[1].length > 0 && last?.kind === "list" && last.items.length) {
         last.items[last.items.length - 1].children.push(entry);
       } else if (last?.kind === "list") {
@@ -73,9 +78,15 @@ export function parseMarkdown(source: string): Block[] {
       } else {
         blocks.push({ kind: "list", items: [entry] });
       }
+    } else if (openItem && /^ +\S/.test(line)) {
+      // An indented line right after an item is that item wrapped.
+      openItem.raw = `${openItem.raw} ${line.trim()}`;
+      openItem.entry.content = parseInline(openItem.raw);
     } else if (line.trim() === "") {
       flushParagraph();
+      openItem = null;
     } else {
+      openItem = null;
       paragraph.push(line.trim());
     }
   }

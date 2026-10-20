@@ -77,6 +77,28 @@ describe("parseMarkdown", () => {
     ]);
   });
 
+  it("handles Windows line endings", () => {
+    expect(parseMarkdown("## A\r\n\r\n- x\r\n").map((b) => b.kind)).toEqual([
+      "heading",
+      "list",
+    ]);
+  });
+
+  it("joins a wrapped list item's continuation line", () => {
+    expect(parseMarkdown("- first part\n  second part\n- next")).toEqual([
+      {
+        kind: "list",
+        items: [
+          {
+            content: [{ kind: "text", text: "first part second part" }],
+            children: [],
+          },
+          { content: [{ kind: "text", text: "next" }], children: [] },
+        ],
+      },
+    ]);
+  });
+
   it("starts a new list after a paragraph", () => {
     const blocks = parseMarkdown("- a\n\ntext\n\n- b");
     expect(blocks.map((block) => block.kind)).toEqual([
