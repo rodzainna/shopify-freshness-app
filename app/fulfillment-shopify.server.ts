@@ -9,13 +9,9 @@ import {
   MAX_BATCHES,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
   type SaveProductFreshnessData,
+  type UserErrorsPayload,
   saveProductFreshnessVariables,
 } from "../shared/product-metafields";
-
-interface UserError {
-  message: string;
-  code: string | null;
-}
 
 // admin.graphql throws on top-level GraphQL errors, so only userErrors
 // need checking here.
@@ -184,7 +180,7 @@ async function setBatchQuantity(
   quantity: number,
 ): Promise<void> {
   const data = await query<{
-    metaobjectUpdate: { userErrors: UserError[] } | null;
+    metaobjectUpdate: UserErrorsPayload | null;
   }>(
     admin,
     `#graphql
@@ -210,7 +206,7 @@ async function setBatchQuantity(
 
 async function deleteBatch(admin: AdminApiContext, id: string): Promise<void> {
   const data = await query<{
-    metaobjectDelete: { userErrors: UserError[] } | null;
+    metaobjectDelete: UserErrorsPayload | null;
   }>(
     admin,
     `#graphql

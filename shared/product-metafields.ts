@@ -77,8 +77,13 @@ export const SAVE_PRODUCT_FRESHNESS_MUTATION = `#graphql
   }
 `;
 
+// `code` is only present when the operation selects it
 export interface UserErrorsPayload {
-  userErrors: { field: string[] | null; message: string }[];
+  userErrors: {
+    field: string[] | null;
+    message: string;
+    code?: string | null;
+  }[];
 }
 
 export interface SaveProductFreshnessData {
