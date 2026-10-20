@@ -91,3 +91,40 @@ function isExpired(batch: Batch, today: string): boolean {
     computeBatchFreshness(batch.expirationDate, today).status === "Expired"
   );
 }
+
+/**
+ * Before re-applying a saved plan, checks that each batch it touches is at
+ * its "before" or "after" value. Anything else means someone edited it in
+ * between, and re-applying would overwrite that edit.
+ *
+ * @param current - the product's batches as just re-read from Shopify
+ */
+export function checkPlanBeforeRetry(
+  plan: FulfillmentPlanData,
+  current: StoredBatch[],
+): "safe" | "changed" {
+  const unique = dedupeById(current);
+  const listIds = unique.map(({ id }) => id);
+  if (
+    !sameIds(listIds, plan.beforeBatchIds) &&
+    !sameIds(listIds, plan.batchIds)
+  ) {
+    return "changed";
+  }
+
+  const quantities = new Map(unique.map((batch) => [batch.id, batch.quantity]));
+  const updatesOk = plan.updates.every(({ id, before, after }) => {
+    const quantity = quantities.get(id);
+    return quantity === before || quantity === after;
+  });
+  // A deleted batch is unlinked first, so it's either gone or untouched
+  const deletesOk = plan.deletes.every(({ id, before }) => {
+    const quantity = quantities.get(id);
+    return quantity === undefined || quantity === before;
+  });
+  return updatesOk && deletesOk ? "safe" : "changed";
+}
+
+function sameIds(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}

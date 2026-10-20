@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { planFulfillment } from "./fulfillment-plan";
+import { checkPlanBeforeRetry, planFulfillment } from "./fulfillment-plan";
 
 const TODAY = "2026-10-20";
 
@@ -103,5 +103,53 @@ describe("planFulfillment", () => {
         planFulfillment([invalid, EXPIRED], 5, TODAY).shortfall,
       ).toStrictEqual({ reason: "oversell", shortfall: 5, expiredUnits: 4 });
     });
+  });
+});
+
+describe("checkPlanBeforeRetry", () => {
+  // Takes 5: "soon" (3) is emptied, "later" goes from 10 to 8
+  const { plan } = planFulfillment([SOON, LATER], 5, TODAY);
+  const laterAfter = batch("later", 8, "2026-11-05");
+
+  it("is safe when nothing was applied yet", () => {
+    expect(checkPlanBeforeRetry(plan, [SOON, LATER])).toBe("safe");
+  });
+
+  it("is safe when only the quantities were applied", () => {
+    expect(checkPlanBeforeRetry(plan, [SOON, laterAfter])).toBe("safe");
+  });
+
+  it("is safe when the list was rewritten too", () => {
+    expect(checkPlanBeforeRetry(plan, [laterAfter])).toBe("safe");
+  });
+
+  it("is changed when a batch quantity was edited", () => {
+    const edited = batch("later", 6, "2026-11-05");
+
+    expect(checkPlanBeforeRetry(plan, [SOON, edited])).toBe("changed");
+  });
+
+  it("is changed when a batch to delete was edited", () => {
+    const edited = batch("soon", 1, "2026-10-22");
+
+    expect(checkPlanBeforeRetry(plan, [edited, LATER])).toBe("changed");
+  });
+
+  it("is changed when a batch was added", () => {
+    const added = batch("new", 2, "2026-12-01");
+
+    expect(checkPlanBeforeRetry(plan, [SOON, LATER, added])).toBe("changed");
+  });
+
+  it("is changed when a batch was removed", () => {
+    expect(checkPlanBeforeRetry(plan, [SOON])).toBe("changed");
+  });
+
+  it("is changed when the batches were reordered", () => {
+    expect(checkPlanBeforeRetry(plan, [LATER, SOON])).toBe("changed");
+  });
+
+  it("ignores a repeated id, as the plan did", () => {
+    expect(checkPlanBeforeRetry(plan, [SOON, SOON, LATER])).toBe("safe");
   });
 });
