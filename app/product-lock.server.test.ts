@@ -134,6 +134,18 @@ describe("withProductLock", () => {
     expect(work).not.toHaveBeenCalled();
   });
 
+  it("gives up at the wait deadline, not after a full poll", async () => {
+    await holdLock(new Date());
+    const start = Date.now();
+    await expect(
+      withProductLock(shop, productId, async () => {}, {
+        waitMs: 50,
+        pollMs: 1_000,
+      }),
+    ).rejects.toBeInstanceOf(ProductLockBusyError);
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
   it("waits for a holder that releases within the wait", async () => {
     const token = await holdLock(new Date());
     setTimeout(() => releaseProductLock(shop, productId, token), 30);

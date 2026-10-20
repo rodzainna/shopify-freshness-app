@@ -77,7 +77,8 @@ export async function withProductLock<T>(
   const deadline = Date.now() + waitMs;
   let token = await acquireProductLock(shop, productId);
   while (token === null && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    const delay = Math.min(pollMs, deadline - Date.now());
+    await new Promise((resolve) => setTimeout(resolve, delay));
     token = await acquireProductLock(shop, productId);
   }
   if (token === null) throw new ProductLockBusyError(shop, productId);
