@@ -206,33 +206,78 @@ describe("applyPlan", () => {
     ]);
   });
 
-  it("sends a step's writes together, not one after another", async () => {
-    let inFlight = 0;
-    let mostInFlight = 0;
+  // Each write takes a few ms, so overlapping writes are counted as in flight
+  function slowAdmin(failIds: string[] = []) {
+    const state = { inFlight: 0, mostInFlight: 0, finished: 0 };
     const admin = {
-      graphql: async (query: string) => {
-        inFlight += 1;
-        mostInFlight = Math.max(mostInFlight, inFlight);
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        inFlight -= 1;
+      graphql: async (
+        query: string,
+        options?: { variables?: { id?: string } },
+      ) => {
+        state.inFlight += 1;
+        state.mostInFlight = Math.max(state.mostInFlight, state.inFlight);
+        const id = options?.variables?.id ?? "";
+        // Failures come back first, so a waiting caller is observable
+        await new Promise((resolve) =>
+          setTimeout(resolve, failIds.includes(id) ? 1 : 10),
+        );
+        state.inFlight -= 1;
+        state.finished += 1;
+        const userErrors = failIds.includes(id)
+          ? [{ message: `Rejected ${id}`, code: "INVALID" }]
+          : [];
         const data = query.includes("SetBatchQuantity")
-          ? { metaobjectUpdate: noUserErrors }
+          ? { metaobjectUpdate: { userErrors } }
           : { metafieldsSet: noUserErrors };
         return Response.json({ data });
       },
     } as unknown as AdminApiContext;
-    const twoUpdates: FulfillmentPlanData = {
-      ...plan,
-      updates: [
-        { id: "gid://shopify/Metaobject/2", before: 10, after: 8 },
-        { id: "gid://shopify/Metaobject/3", before: 4, after: 1 },
-      ],
-      deletes: [],
-    };
+    return { admin, state };
+  }
 
-    await applyPlan(admin, productId, twoUpdates, null);
+  const updatesFor = (count: number): FulfillmentPlanData => ({
+    ...plan,
+    updates: Array.from({ length: count }, (_, index) => ({
+      id: `gid://shopify/Metaobject/${index + 10}`,
+      before: 5,
+      after: 4,
+    })),
+    deletes: [],
+  });
 
-    expect(mostInFlight).toBe(2);
+  it("sends a step's writes together, not one after another", async () => {
+    const { admin, state } = slowAdmin();
+
+    await applyPlan(admin, productId, updatesFor(2), null);
+
+    expect(state.mostInFlight).toBe(2);
+  });
+
+  it("keeps at most 10 writes in flight", async () => {
+    const { admin, state } = slowAdmin();
+
+    await applyPlan(admin, productId, updatesFor(25), null);
+
+    expect(state.mostInFlight).toBe(10);
+    // 25 quantity writes, then the list write
+    expect(state.finished).toBe(26);
+  });
+
+  it("waits for every write and reports every failure", async () => {
+    const failIds = [
+      "gid://shopify/Metaobject/10",
+      "gid://shopify/Metaobject/12",
+    ];
+    const { admin, state } = slowAdmin(failIds);
+
+    await expect(
+      applyPlan(admin, productId, updatesFor(3), null),
+    ).rejects.toThrow(
+      "Setting batch gid://shopify/Metaobject/10 quantity failed: Rejected gid://shopify/Metaobject/10; " +
+        "Setting batch gid://shopify/Metaobject/12 quantity failed: Rejected gid://shopify/Metaobject/12",
+    );
+    // The slower, successful write had finished before applyPlan threw
+    expect(state.finished).toBe(3);
   });
 
   it("doesn't write the list when any quantity is rejected", async () => {

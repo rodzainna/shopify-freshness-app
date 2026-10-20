@@ -129,9 +129,8 @@ export async function applyPlan(
   plan: FulfillmentPlanData,
   earliestExpirationDate: string | null,
 ): Promise<void> {
-  // Writes within a step don't depend on each other, so they run together
-  await Promise.all(
-    plan.updates.map(({ id, after }) => setBatchQuantity(admin, id, after)),
+  await writeEach(plan.updates, ({ id, after }) =>
+    setBatchQuantity(admin, id, after),
   );
 
   const freshness = await query<SaveProductFreshnessData>(
@@ -149,7 +148,36 @@ export async function applyPlan(
     freshness.metafieldsDelete?.userErrors,
   );
 
-  await Promise.all(plan.deletes.map(({ id }) => deleteBatch(admin, id)));
+  await writeEach(plan.deletes, ({ id }) => deleteBatch(admin, id));
+}
+
+// Enough to overlap round trips without spending Shopify's rate limit at once
+const MAX_WRITES_IN_FLIGHT = 10;
+
+/**
+ * Runs independent writes in groups, waiting for every one to settle so none
+ * is still landing after this returns. Throws once, listing every failure.
+ */
+async function writeEach<T>(
+  items: T[],
+  write: (item: T) => Promise<void>,
+): Promise<void> {
+  const errors: unknown[] = [];
+  for (let start = 0; start < items.length; start += MAX_WRITES_IN_FLIGHT) {
+    const group = items.slice(start, start + MAX_WRITES_IN_FLIGHT);
+    const results = await Promise.allSettled(group.map(write));
+    for (const result of results) {
+      if (result.status === "rejected") errors.push(result.reason);
+    }
+  }
+
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) {
+    const messages = errors.map((error) =>
+      error instanceof Error ? error.message : String(error),
+    );
+    throw new Error(messages.join("; "));
+  }
 }
 
 async function setBatchQuantity(
