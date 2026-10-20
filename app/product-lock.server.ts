@@ -77,7 +77,9 @@ export async function withProductLock<T>(
   const deadline = Date.now() + waitMs;
   let token = await acquireProductLock(shop, productId);
   while (token === null && Date.now() < deadline) {
-    const delay = Math.min(pollMs, deadline - Date.now());
+    // Jitter so waiters on the same product don't all retry at once.
+    const jittered = pollMs * (0.5 + Math.random());
+    const delay = Math.min(jittered, deadline - Date.now());
     await new Promise((resolve) => setTimeout(resolve, delay));
     token = await acquireProductLock(shop, productId);
   }
