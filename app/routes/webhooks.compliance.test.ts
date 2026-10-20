@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import db from "../db.server";
 import { authenticateWebhookSafely } from "../webhooks.server";
 import { action } from "./webhooks.compliance";
+import {
+  clearShopData,
+  seedShopData,
+  shopsWithData,
+} from "../../test/shop-data";
 
 vi.mock("../shopify.server", () => ({
   authenticate: { webhook: vi.fn() },
@@ -14,33 +18,7 @@ vi.mock("../webhooks.server", async (importOriginal) => ({
 
 const shop = "compliance-test.myshopify.com";
 const otherShop = "compliance-other.myshopify.com";
-const testShops = { shop: { in: [shop, otherShop] } };
-
-async function seed() {
-  for (const owner of [shop, otherShop]) {
-    await db.session.create({
-      data: {
-        id: `offline_${owner}`,
-        shop: owner,
-        state: "",
-        accessToken: "t",
-      },
-    });
-    await db.productLock.create({
-      data: {
-        shop: owner,
-        productId: "gid://shopify/Product/1",
-        token: "t",
-        expiresAt: new Date(),
-      },
-    });
-  }
-}
-
-async function clearTestData() {
-  await db.session.deleteMany({ where: testShops });
-  await db.productLock.deleteMany({ where: testShops });
-}
+const shops = [shop, otherShop];
 
 function deliver(topic: string) {
   vi.mocked(authenticateWebhookSafely).mockResolvedValue({
@@ -57,27 +35,33 @@ function deliver(topic: string) {
 describe("compliance webhooks", () => {
   beforeEach(async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
-    await clearTestData();
-    await seed();
+    await clearShopData(shops);
+    await seedShopData(shop);
+    await seedShopData(otherShop);
   });
-  afterEach(clearTestData);
+  afterEach(() => clearShopData(shops));
   afterEach(() => vi.restoreAllMocks());
 
-  it("deletes only the redacted shop's data on shop/redact", async () => {
+  it("deletes all of the redacted shop's data, and only that shop's", async () => {
     expect((await deliver("SHOP_REDACT")).status).toBe(200);
-    expect(await db.session.findMany({ where: testShops })).toEqual([
-      expect.objectContaining({ shop: otherShop }),
-    ]);
-    expect(await db.productLock.findMany({ where: testShops })).toEqual([
-      expect.objectContaining({ shop: otherShop }),
-    ]);
+    expect(await shopsWithData(shops)).toEqual({
+      sessions: [otherShop],
+      locks: [otherShop],
+      plans: [otherShop],
+      discrepancies: [otherShop],
+    });
   });
 
   it.each(["CUSTOMERS_DATA_REQUEST", "CUSTOMERS_REDACT"])(
     "acknowledges %s without deleting anything",
     async (topic) => {
       expect((await deliver(topic)).status).toBe(200);
-      expect(await db.session.count({ where: testShops })).toBe(2);
+      expect(await shopsWithData(shops)).toEqual({
+        sessions: shops.toSorted(),
+        locks: shops.toSorted(),
+        plans: shops.toSorted(),
+        discrepancies: shops.toSorted(),
+      });
     },
   );
 });
