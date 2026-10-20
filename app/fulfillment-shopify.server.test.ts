@@ -105,9 +105,19 @@ describe("readProductBatches", () => {
     });
   });
 
-  it("returns no batches when the product has none", async () => {
+  it("reports a product the app doesn't track", async () => {
     const { admin } = fakeAdmin({
       GetProductBatches: () => ({ product: { freshnessBatches: null } }),
+    });
+
+    expect(await readProductBatches(admin, productId)).toStrictEqual({
+      notTracked: true,
+    });
+  });
+
+  it("returns no batches for a tracked product with an empty list", async () => {
+    const { admin } = fakeAdmin({
+      GetProductBatches: () => batchesResponse([]),
     });
 
     expect(await readProductBatches(admin, productId)).toStrictEqual({

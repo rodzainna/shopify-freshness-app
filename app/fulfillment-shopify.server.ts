@@ -62,8 +62,10 @@ interface ProductBatchesData {
   } | null;
 }
 
+// notTracked: the product has no batch list, so the app has nothing to update
 export type ProductBatches =
   | { batches: StoredBatch[] }
+  | { notTracked: true }
   | { problem: "product_not_found" | "too_many_batches" };
 
 export async function readProductBatches(
@@ -99,11 +101,12 @@ export async function readProductBatches(
   );
 
   if (!product) return { problem: "product_not_found" };
-  const references = product.freshnessBatches?.references;
-  if (references?.pageInfo.hasNextPage) return { problem: "too_many_batches" };
+  if (!product.freshnessBatches) return { notTracked: true };
+  const { references } = product.freshnessBatches;
+  if (references.pageInfo.hasNextPage) return { problem: "too_many_batches" };
 
   return {
-    batches: (references?.nodes ?? []).flatMap((node) =>
+    batches: references.nodes.flatMap((node) =>
       node.id
         ? [
             {
