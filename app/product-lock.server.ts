@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import db from "./db.server";
+import { PRODUCT_GID } from "../shared/product-gid";
 
 export const PRODUCT_LOCK_TTL_MS = 30_000;
 
-const PRODUCT_GID = /^gid:\/\/shopify\/Product\/\d+$/;
 const UNIQUE_CONSTRAINT_VIOLATION = "P2002";
 
 /** Returns a token to release with, or null if a live lock is held elsewhere. */
@@ -13,7 +13,6 @@ export async function acquireProductLock(
   productId: string,
   now: Date = new Date(),
 ): Promise<string | null> {
-  // One key format only: a numeric id and a GID would be two separate locks.
   if (!PRODUCT_GID.test(productId)) {
     throw new Error(`Expected a Product GID, got "${productId}"`);
   }

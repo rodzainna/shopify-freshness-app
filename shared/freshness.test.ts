@@ -6,6 +6,7 @@ import {
   computeBatchFreshness,
   computeAggregateFreshness,
   isInStock,
+  isPositiveWholeNumber,
   formatDaysRemaining,
   getEarliestExpirationDate,
 } from "./freshness";
@@ -181,5 +182,15 @@ describe("isInStock", () => {
     ];
     expect(computeAggregateFreshness(batches, "2026-09-12")).toBe("Fresh");
     expect(getEarliestExpirationDate(batches)).toBe("2026-12-01");
+  });
+});
+
+describe("isPositiveWholeNumber", () => {
+  it.each([1, 42])("accepts %s", (value) => {
+    expect(isPositiveWholeNumber(value)).toBe(true);
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity, "2", null])("rejects %s", (value) => {
+    expect(isPositiveWholeNumber(value)).toBe(false);
   });
 });
