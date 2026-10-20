@@ -1,52 +1,70 @@
+import { isPositiveWholeNumber } from "./freshness";
 import { toProductGid } from "./product-gid";
+import { MAX_QUANTITY } from "./validation";
 
 export type ProductQuantity = { productId: string; quantity: number };
 
 export type SkippedLineItem = {
+  index: number;
   lineItemId: unknown;
   reason:
+    | "not a line item list"
     | "not a line item"
     | "no product"
     | "invalid product id"
+    | "zero quantity"
     | "invalid quantity";
 };
 
-/**
- * Totals a fulfillments/create payload's line items per product, since
- * batches belong to the product, not the variant.
- *
- * `quantity` is the units in this fulfillment (verified against a partial
- * fulfillment); `fulfillable_quantity` is what's left and isn't used.
- */
-export function groupLineItemsByProduct(lineItems: unknown[]): {
+// Totals per product, since batches belong to the product, not the variant.
+// `quantity` is the units in this fulfillment; `fulfillable_quantity` isn't used.
+export function groupLineItemsByProduct(lineItems: unknown): {
   products: ProductQuantity[];
   skipped: SkippedLineItem[];
 } {
+  if (!Array.isArray(lineItems)) {
+    return {
+      products: [],
+      skipped: [
+        { index: -1, lineItemId: undefined, reason: "not a line item list" },
+      ],
+    };
+  }
+
   const totals = new Map<string, number>();
   const skipped: SkippedLineItem[] = [];
 
-  for (const item of lineItems) {
-    if (typeof item !== "object" || item === null) {
-      skipped.push({ lineItemId: undefined, reason: "not a line item" });
-      continue;
+  lineItems.forEach((item: unknown, index) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      skipped.push({ index, lineItemId: undefined, reason: "not a line item" });
+      return;
     }
     const {
       id,
       product_id: productId,
       quantity,
     } = item as Record<string, unknown>;
+    const skip = (reason: SkippedLineItem["reason"]) =>
+      skipped.push({ index, lineItemId: id, reason });
 
     if (productId === null || productId === undefined) {
-      skipped.push({ lineItemId: id, reason: "no product" });
-    } else if (!Number.isSafeInteger(productId) || (productId as number) <= 0) {
-      skipped.push({ lineItemId: id, reason: "invalid product id" });
-    } else if (!Number.isInteger(quantity) || (quantity as number) <= 0) {
-      skipped.push({ lineItemId: id, reason: "invalid quantity" });
+      skip("no product");
+    } else if (
+      typeof productId !== "number" ||
+      !Number.isSafeInteger(productId) ||
+      productId <= 0
+    ) {
+      skip("invalid product id");
+    } else if (quantity === 0) {
+      skip("zero quantity");
+    } else if (!isPositiveWholeNumber(quantity) || quantity > MAX_QUANTITY) {
+      skip("invalid quantity");
     } else {
-      const gid = toProductGid(productId as number);
-      totals.set(gid, (totals.get(gid) ?? 0) + (quantity as number));
+      const gid = toProductGid(productId);
+      // Lines are capped at MAX_QUANTITY, so the sum stays an exact integer.
+      totals.set(gid, (totals.get(gid) ?? 0) + quantity);
     }
-  }
+  });
 
   return {
     products: [...totals].map(([productId, quantity]) => ({
