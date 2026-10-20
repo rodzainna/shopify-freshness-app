@@ -5,6 +5,7 @@ import {
   getShopToday,
   computeBatchFreshness,
   computeAggregateFreshness,
+  isExpired,
   isInStock,
   isPositiveWholeNumber,
   formatDaysRemaining,
@@ -158,6 +159,20 @@ describe("getEarliestExpirationDate", () => {
         { quantity: 0, expirationDate: "2026-10-01" },
       ]),
     ).toBeNull();
+  });
+});
+
+describe("isExpired", () => {
+  it.each([
+    ["the day before today", "2026-10-19", true],
+    ["today, its last usable day", "2026-10-20", false],
+    ["a future date", "2026-10-21", false],
+    ["an unreadable date", "not-a-date", false],
+    ["a missing date", "", false],
+  ])("is %s → %s", (_, expirationDate, expected) => {
+    expect(isExpired({ quantity: 1, expirationDate }, "2026-10-20")).toBe(
+      expected,
+    );
   });
 });
 

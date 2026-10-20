@@ -1,9 +1,8 @@
 import { decrementFefo } from "./fefo";
 import {
   type Batch,
-  computeBatchFreshness,
   getEarliestExpirationDate,
-  isCalendarDate,
+  isExpired,
   isInStock,
 } from "./freshness";
 
@@ -82,14 +81,6 @@ function dedupeById(batches: StoredBatch[]): StoredBatch[] {
     seen.add(id);
     return true;
   });
-}
-
-// Same rule decrementFefo uses to skip a batch
-function isExpired(batch: Batch, today: string): boolean {
-  return (
-    isCalendarDate(batch.expirationDate) &&
-    computeBatchFreshness(batch.expirationDate, today).status === "Expired"
-  );
 }
 
 /**

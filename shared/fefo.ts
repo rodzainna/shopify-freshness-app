@@ -1,7 +1,7 @@
 import {
   type Batch,
-  computeBatchFreshness,
   isCalendarDate,
+  isExpired,
   isInStock,
   isPositiveWholeNumber,
 } from "./freshness";
@@ -45,15 +45,8 @@ export function decrementFefo<T extends Batch>(
   // keep their order
   const pickOrder = batches
     .flatMap((batch, index) => {
-      if (!isInStock(batch)) return [];
+      if (!isInStock(batch) || isExpired(batch, today)) return [];
       const readable = isCalendarDate(batch.expirationDate);
-      // Same expiry rule as the dashboard; an unreadable date can't be judged
-      if (
-        readable &&
-        computeBatchFreshness(batch.expirationDate, today).status === "Expired"
-      ) {
-        return [];
-      }
       return [{ batch, index, readable }];
     })
     .sort(compareExpiry);
