@@ -6,6 +6,8 @@ A small, scoped Shopify app being built as a portfolio piece to demonstrate cust
 
 **Current status:** in progress. Done so far: install/uninstall lifecycle (token exchange, webhook dedup, malformed-payload handling), the batch metaobject and product metafield definitions, shared freshness logic (unit-tested), and the product-page panel UI for batch rows. Next: saving batches to Shopify, then the dashboard and FEFO decrement on fulfillment.
 
+**Privacy:** see [PRIVACY.md](PRIVACY.md) for the personal data the app processes and stores.
+
 Scaffolded from Shopify's official React Router app template — the rest of this README is template-level framework/setup documentation, trimmed to what's actually relevant to this project's stack (macOS, npm, SQLite, no MongoDB, no Windows).
 
 ---
