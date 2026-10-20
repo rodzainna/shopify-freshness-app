@@ -48,3 +48,39 @@ model ProductLock {
 
   @@id([shop, productId])
 }
+
+enum DiscrepancyReason {
+  oversell
+  expired_stock_only
+  product_not_found
+  too_many_batches
+  changed_during_retry
+}
+
+// A fulfillment's target batch state for one product, saved before any Shopify
+// write so a retry re-applies it instead of decrementing again.
+model FulfillmentPlan {
+  shop          String
+  fulfillmentId String
+  productId     String
+  plan          Json
+  createdAt     DateTime  @default(now())
+  appliedAt     DateTime?
+
+  @@id([shop, fulfillmentId, productId])
+  @@index([shop, productId, appliedAt])
+}
+
+// Units a fulfillment couldn't take from fresh stock, or a product it couldn't process.
+model FulfillmentDiscrepancy {
+  shop          String
+  fulfillmentId String
+  productId     String
+  reason        DiscrepancyReason
+  shortfall     Int?
+  expiredUnits  Int?
+  createdAt     DateTime          @default(now())
+
+  @@id([shop, fulfillmentId, productId])
+  @@index([shop, createdAt])
+}
