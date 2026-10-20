@@ -125,6 +125,32 @@ describe("readProductBatches", () => {
     });
   });
 
+  it("refuses a list with a batch it can't identify", async () => {
+    const { admin } = fakeAdmin({
+      GetProductBatches: () =>
+        batchesResponse([
+          { id: "gid://shopify/Metaobject/1", quantity: { value: "3" } },
+          {},
+        ]),
+    });
+
+    await expect(readProductBatches(admin, productId)).rejects.toThrow(
+      `Product ${productId} has a batch list the app can't read`,
+    );
+  });
+
+  it("refuses a batch list metafield with no references", async () => {
+    const { admin } = fakeAdmin({
+      GetProductBatches: () => ({
+        product: { freshnessBatches: { references: null } },
+      }),
+    });
+
+    await expect(readProductBatches(admin, productId)).rejects.toThrow(
+      `Product ${productId} has a batch list the app can't read`,
+    );
+  });
+
   it("reports a deleted product", async () => {
     const { admin } = fakeAdmin({
       GetProductBatches: () => ({ product: null }),

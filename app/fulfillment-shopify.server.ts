@@ -55,7 +55,7 @@ interface ProductBatchesData {
           expirationDate?: { value: string } | null;
         }[];
         pageInfo: { hasNextPage: boolean };
-      };
+      } | null;
     } | null;
   } | null;
 }
@@ -101,20 +101,18 @@ export async function readProductBatches(
   if (!product) return { problem: "product_not_found" };
   if (!product.freshnessBatches) return { notTracked: true };
   const { references } = product.freshnessBatches;
+  // Writing back a list we couldn't fully read would unlink batches, so stop
+  if (!references || references.nodes.some((node) => !node.id)) {
+    throw new Error(`Product ${productId} has a batch list the app can't read`);
+  }
   if (references.pageInfo.hasNextPage) return { problem: "too_many_batches" };
 
   return {
-    batches: references.nodes.flatMap((node) =>
-      node.id
-        ? [
-            {
-              id: node.id,
-              quantity: Number(node.quantity?.value ?? 0),
-              expirationDate: node.expirationDate?.value ?? "",
-            },
-          ]
-        : [],
-    ),
+    batches: references.nodes.map((node) => ({
+      id: node.id!,
+      quantity: Number(node.quantity?.value ?? 0),
+      expirationDate: node.expirationDate?.value ?? "",
+    })),
   };
 }
 
