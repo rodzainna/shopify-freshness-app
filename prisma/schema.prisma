@@ -38,3 +38,13 @@ model ProcessedWebhook {
   topic       String
   processedAt DateTime @default(now())
 }
+
+// Serializes batch updates per product; expiresAt frees a crashed holder's lock.
+model ProductLock {
+  shop      String
+  productId String
+  token     String
+  expiresAt DateTime
+
+  @@id([shop, productId])
+}
