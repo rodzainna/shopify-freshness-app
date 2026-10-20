@@ -1,9 +1,11 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import db from "./db.server";
 import {
   PRODUCT_LOCK_TTL_MS,
+  ProductLockBusyError,
   acquireProductLock,
   releaseProductLock,
+  withProductLock,
 } from "./product-lock.server";
 
 const shop = "lock-test.myshopify.com";
@@ -18,11 +20,14 @@ async function holdLock(at: Date): Promise<string> {
   return token;
 }
 
-describe("product lock", () => {
-  afterEach(async () => {
-    await db.productLock.deleteMany({ where: { shop } });
-  });
+// Before too: a failed concurrency test can leave a row behind for the next run.
+async function clearTestLocks() {
+  await db.productLock.deleteMany({ where: { shop } });
+}
+beforeEach(clearTestLocks);
+afterEach(clearTestLocks);
 
+describe("product lock", () => {
   it("acquires a free lock", async () => {
     expect(await acquireProductLock(shop, productId, now)).toEqual(
       expect.any(String),
@@ -87,5 +92,57 @@ describe("product lock", () => {
     await expect(acquireProductLock(shop, "1", now)).rejects.toThrow(
       'Expected a Product GID, got "1"',
     );
+  });
+});
+
+describe("withProductLock", () => {
+  const quickWait = { waitMs: 100, pollMs: 10 };
+
+  it("returns the result and releases the lock", async () => {
+    expect(await withProductLock(shop, productId, async () => 42)).toBe(42);
+    expect(await acquireProductLock(shop, productId)).not.toBe(null);
+  });
+
+  it("releases the lock when the work throws", async () => {
+    await expect(
+      withProductLock(shop, productId, async () => {
+        throw new Error("write failed");
+      }),
+    ).rejects.toThrow("write failed");
+    expect(await acquireProductLock(shop, productId)).not.toBe(null);
+  });
+
+  it("throws ProductLockBusyError when the lock stays busy", async () => {
+    await holdLock(new Date());
+    const work = vi.fn(async () => {});
+    await expect(
+      withProductLock(shop, productId, work, quickWait),
+    ).rejects.toBeInstanceOf(ProductLockBusyError);
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it("waits for a holder that releases within the wait", async () => {
+    const token = await holdLock(new Date());
+    setTimeout(() => releaseProductLock(shop, productId, token), 30);
+    expect(
+      await withProductLock(shop, productId, async () => "ran", quickWait),
+    ).toBe("ran");
+  });
+
+  it("never runs two updates of the same product at once", async () => {
+    let running = 0;
+    let maxRunning = 0;
+    const work = async () => {
+      running++;
+      maxRunning = Math.max(maxRunning, running);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      running--;
+    };
+    await Promise.all([
+      withProductLock(shop, productId, work, { waitMs: 1_000, pollMs: 5 }),
+      withProductLock(shop, productId, work, { waitMs: 1_000, pollMs: 5 }),
+      withProductLock(shop, productId, work, { waitMs: 1_000, pollMs: 5 }),
+    ]);
+    expect(maxRunning).toBe(1);
   });
 });

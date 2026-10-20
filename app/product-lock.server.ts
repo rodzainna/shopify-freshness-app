@@ -55,3 +55,38 @@ export async function releaseProductLock(
   });
   return count === 1;
 }
+
+export class ProductLockBusyError extends Error {
+  constructor(shop: string, productId: string) {
+    super(`Product ${productId} on ${shop} is locked by another update`);
+    this.name = "ProductLockBusyError";
+  }
+}
+
+/**
+ * Runs `fn` while holding the product's lock, releasing it even if `fn` throws.
+ * @throws ProductLockBusyError if the lock stays busy for `waitMs`
+ */
+export async function withProductLock<T>(
+  shop: string,
+  productId: string,
+  fn: () => Promise<T>,
+  { waitMs = 1_500, pollMs = 250 } = {},
+): Promise<T> {
+  // Short wait: Shopify needs a webhook response within 5 seconds.
+  const deadline = Date.now() + waitMs;
+  let token = await acquireProductLock(shop, productId);
+  while (token === null && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    token = await acquireProductLock(shop, productId);
+  }
+  if (token === null) throw new ProductLockBusyError(shop, productId);
+
+  try {
+    return await fn();
+  } finally {
+    if (!(await releaseProductLock(shop, productId, token))) {
+      console.warn(`Lock on ${productId} for ${shop} expired before release`);
+    }
+  }
+}
