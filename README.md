@@ -1,18 +1,17 @@
 # Shopify Freshness Tracker
 
-An embedded Shopify app for stores that sell perishable goods. Merchants record stock in **batches**, each with a quantity and an expiration date, and see which products are fresh, close to expiry or expired. When an order is fulfilled, stock is meant to come out of the soonest-expiring batch first (**FEFO**, first expired, first out).
+An embedded Shopify app for stores that sell perishable goods. Merchants record stock in **batches**, each with a quantity and an expiration date, and see which products are fresh, close to expiry or expired. When an order is fulfilled, stock comes out of the soonest-expiring batch first (**FEFO**, first expired, first out).
 
 It's a portfolio project, built to show custom Shopify app work end to end. It runs on a development store only.
 
 ## Status
 
-| Area                                                    | State                                                            |
-| ------------------------------------------------------- | ---------------------------------------------------------------- |
-| Batch tracking on the product page                      | Done                                                             |
-| Freshness dashboard                                     | Done                                                             |
-| Fulfillment and compliance webhooks                     | Done: signature-verified; fulfillments deduplicated and recorded |
-| FEFO decrement, per-product lock and line-item grouping | Done as tested building blocks                                   |
-| Decrementing batches when an order is fulfilled         | In progress: the webhook handler doesn't call these yet          |
+| Area                                            | State                                                            |
+| ----------------------------------------------- | ---------------------------------------------------------------- |
+| Batch tracking on the product page              | Done                                                             |
+| Freshness dashboard                             | Done                                                             |
+| Fulfillment and compliance webhooks             | Done: signature-verified; fulfillments deduplicated and recorded |
+| Decrementing batches when an order is fulfilled | Done: FEFO, per-product lock, retry-safe; shortfalls recorded    |
 
 ## Features
 
@@ -41,7 +40,7 @@ Product page panel ──writes──▶ freshness_batch metaobjects (quantity, 
 Dashboard ──reads──▶ the same metaobjects and metafields through the Admin GraphQL API
 
 fulfillments/create webhook ─▶ verify HMAC ─▶ skip duplicates ─▶ group line items by product
-                            ─▶ per-product lock ─▶ FEFO decrement ─▶ write batches  (last four steps in progress)
+                            ─▶ per-product lock ─▶ FEFO plan ─▶ save plan (and any shortfall) ─▶ write batches
 ```
 
 **Freshness status is computed on every view, never stored.** It comes from each batch's expiration date and the shop's local "today":
@@ -59,20 +58,22 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 - **Plain calendar dates.** Batches store `YYYY-MM-DD`. Days remaining is simple date subtraction in the shop's timezone, the way FEFO and inventory systems count it.
 - **Expired stock is never decremented.** FEFO skips expired batches, because packing teams shouldn't ship them. Anything that fresh stock can't cover is reported as a shortfall, never driven negative.
 - **A per-product lock** (Prisma, SQLite) serializes batch updates. Batches live in Shopify, not in the app's database, so a transaction can't protect them. The lock expires after 30 seconds, so a crashed holder frees it, and release only deletes the caller's own lock.
+- **Save the plan, then write.** Shopify has no transaction across several metaobject writes, so each fulfillment's plan (target quantities, not deltas) is saved first. A retried webhook finishes a half-applied plan instead of decrementing twice. If a merchant edited the batches in between, the plan is dropped and recorded as a discrepancy.
+- **Shortfalls are recorded, not hidden.** When fresh stock can't cover a fulfillment, the gap is saved as an `oversell` or `expired_stock_only` discrepancy, along with deleted products and lists too long to read.
 - **`fulfillments/create`, not `orders/paid`.** Stock leaves on shipment, and partial fulfillments arrive as separate events. On a real partial fulfillment, the payload's `quantity` was the units shipped in that fulfillment.
 - **Minimal data access.** The scopes are `write_products`, `read_metaobjects` and `read_fulfillments`. The app requests no protected customer fields, which Shopify's docs say are then redacted from payloads, and it stores no customer data.
 - **Pure logic in `shared/`.** Freshness, FEFO, validation and grouping are pure functions with unit tests. Routes and the extension call them instead of re-implementing the rules.
 
 ## Tech stack
 
-|                      |                                                                                              |
-| -------------------- | -------------------------------------------------------------------------------------------- |
-| App framework        | React Router 7, `@shopify/shopify-app-react-router`                                          |
-| UI                   | Polaris web components, Preact (admin extension)                                             |
-| Data                 | Shopify metaobjects and metafields; Prisma with SQLite for sessions, webhook dedup and locks |
-| Shopify APIs         | Admin GraphQL API and webhooks, version 2026-07                                              |
-| Language and runtime | TypeScript (ES2024), Node.js 22.12 or newer                                                  |
-| Tests                | Vitest, against a separate SQLite test database                                              |
+|                      |                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| App framework        | React Router 7, `@shopify/shopify-app-react-router`                                                                            |
+| UI                   | Polaris web components, Preact (admin extension)                                                                               |
+| Data                 | Shopify metaobjects and metafields; Prisma with SQLite for sessions, webhook dedup, locks, fulfillment plans and discrepancies |
+| Shopify APIs         | Admin GraphQL API and webhooks, version 2026-07                                                                                |
+| Language and runtime | TypeScript (ES2024), Node.js 22.12 or newer                                                                                    |
+| Tests                | Vitest, against a separate SQLite test database                                                                                |
 
 ### Dependency pins
 
@@ -85,12 +86,15 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 ```
 app/
   routes/        dashboard, privacy page, auth, webhook handlers
+  fulfillment.server.ts          apply a fulfillment to each product's batches
+  fulfillment-shopify.server.ts  read and write batches through the Admin API
   product-lock.server.ts
   webhooks.server.ts
 extensions/
   freshness-panel/   product page Admin UI extension
 shared/          pure, unit-tested logic used by the app and the extension
 prisma/          schema and migrations
+test/            test database helpers and an in-memory Shopify for fulfillment tests
 ```
 
 ## Running locally
