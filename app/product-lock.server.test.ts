@@ -148,10 +148,13 @@ describe("withProductLock", () => {
 
   it("waits for a holder that releases within the wait", async () => {
     const token = await holdLock(new Date());
-    setTimeout(() => releaseProductLock(shop, productId, token), 30);
+    const released = new Promise((resolve) => setTimeout(resolve, 30)).then(
+      () => releaseProductLock(shop, productId, token),
+    );
     expect(
       await withProductLock(shop, productId, async () => "ran", quickWait),
     ).toBe("ran");
+    expect(await released).toBe(true);
   });
 
   it("never runs two updates of the same product at once", async () => {
