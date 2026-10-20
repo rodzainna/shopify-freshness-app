@@ -8,5 +8,8 @@ export default defineConfig({
   plugins: [tsconfigPaths()],
   test: {
     environment: "node",
+    // Relative to prisma/, like dev.sqlite; tests never touch dev data.
+    env: { DATABASE_URL: "file:test.sqlite" },
+    globalSetup: "./test/setup-database.ts",
   },
 });
