@@ -51,8 +51,11 @@ export function planProductMetafieldWrites(
   return { set, delete: toDelete };
 }
 
+// Shopify's largest page size; the app loads a product's batches in one request
+export const MAX_BATCHES = 250;
+
 // Shared by the panel and the fulfillment webhook, so both write identically.
-export const SAVE_PRODUCT_FRESHNESS_MUTATION = `
+export const SAVE_PRODUCT_FRESHNESS_MUTATION = `#graphql
   mutation SaveProductFreshness(
     $set: [MetafieldsSetInput!]!
     $delete: [MetafieldIdentifierInput!]!
@@ -74,7 +77,7 @@ export const SAVE_PRODUCT_FRESHNESS_MUTATION = `
   }
 `;
 
-interface UserErrorsPayload {
+export interface UserErrorsPayload {
   userErrors: { field: string[] | null; message: string }[];
 }
 

@@ -6,6 +6,7 @@ import type {
 import { getShopToday } from "../shared/freshness";
 import { collectErrorMessages } from "../shared/graphql-errors";
 import {
+  MAX_BATCHES,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
   type SaveProductFreshnessData,
   saveProductFreshnessVariables,
@@ -15,9 +16,6 @@ interface UserError {
   message: string;
   code: string | null;
 }
-
-// Shopify's largest page size; a partial list would drop batches on write
-const MAX_BATCHES = 250;
 
 // admin.graphql throws on top-level GraphQL errors, so only userErrors
 // need checking here.

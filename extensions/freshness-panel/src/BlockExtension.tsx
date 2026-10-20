@@ -14,8 +14,10 @@ import {
 } from "../../../shared/inventory";
 import { collectErrorMessages } from "../../../shared/graphql-errors";
 import {
+  MAX_BATCHES,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
   type SaveProductFreshnessData,
+  type UserErrorsPayload,
   saveProductFreshnessVariables,
 } from "../../../shared/product-metafields";
 import { applySavedIds, failedItems } from "../../../shared/settled";
@@ -45,9 +47,6 @@ interface LoadedPanelData {
   shop: PanelData["shop"];
   product: PanelProduct;
 }
-
-// Shopify's largest page size; the panel loads every batch in one request
-const MAX_BATCHES = 250;
 
 export default async () => {
   await mountPanel(shopify.data.selected[0].id);
@@ -229,10 +228,6 @@ async function saveBatch(batch: PanelBatch): Promise<string> {
   }
 
   return result.metaobject.id;
-}
-
-interface UserErrorsPayload {
-  userErrors: { field: string[] | null; message: string }[];
 }
 
 // Points the product at its saved batches and updates the date the storefront
