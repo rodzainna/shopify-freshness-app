@@ -24,6 +24,10 @@ api_version = "2026-07"
   uri = "/webhooks/fulfillments/create"
   topics = [ "fulfillments/create" ]
 
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/compliance"
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]
 
