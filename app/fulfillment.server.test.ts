@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import db from "./db.server";
 import { processFulfillment } from "./fulfillment.server";
+import { ProductLockBusyError } from "./product-lock.server";
 import { fakeShopify } from "../test/fake-shopify";
 
 const shop = "fulfillment-process-test.myshopify.com";
@@ -19,8 +20,8 @@ async function clearTestData() {
   await db.productLock.deleteMany({ where });
 }
 
-function setup() {
-  const shopify = fakeShopify();
+function setup({ delayMs = 0 } = {}) {
+  const shopify = fakeShopify({ delayMs });
   shopify.addProduct(productId, {
     [SOON]: { quantity: 3, expirationDate: "2026-10-22" },
     [LATER]: { quantity: 10, expirationDate: "2026-11-05" },
@@ -329,4 +330,57 @@ describe("processFulfillment", () => {
 
     expect(await db.productLock.count({ where: { shop } })).toBe(0);
   });
+});
+
+describe("concurrent fulfillments of one product", () => {
+  beforeEach(async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await clearTestData();
+  });
+  afterEach(clearTestData);
+  afterEach(() => vi.restoreAllMocks());
+
+  it("applies both without losing either update", async () => {
+    // Each call takes 40ms, so both read the batches before either writes
+    // unless the lock makes the second wait
+    const { shopify, fulfill } = setup({ delayMs: 40 });
+
+    await Promise.all([
+      fulfill("gid://shopify/Fulfillment/1", 5),
+      fulfill("gid://shopify/Fulfillment/2", 1),
+    ]);
+
+    // 13 units - 5 - 1, in whichever order the lock let them through
+    expect(shopify.batch(SOON)).toBeUndefined();
+    expect(shopify.batch(LATER)?.quantity).toBe(7);
+    expect(shopify.product(productId)?.batchIds).toStrictEqual([LATER]);
+    expect(
+      await db.fulfillmentPlan.count({ where: { shop, appliedAt: null } }),
+    ).toBe(0);
+    expect(await db.productLock.count({ where: { shop } })).toBe(0);
+  });
+
+  it("makes a fulfillment that waits too long retry, then applies it once", async () => {
+    // 4 calls of 450ms keep the first holder busy past the 1.5s wait
+    const { shopify, fulfill } = setup({ delayMs: 450 });
+
+    const [first, second] = await Promise.allSettled([
+      fulfill("gid://shopify/Fulfillment/1", 5),
+      new Promise((resolve) => setTimeout(resolve, 50)).then(() =>
+        fulfill("gid://shopify/Fulfillment/2", 1),
+      ),
+    ]);
+    expect(first.status).toBe("fulfilled");
+    expect(second).toMatchObject({
+      status: "rejected",
+      reason: expect.any(ProductLockBusyError),
+    });
+    expect(shopify.batch(LATER)?.quantity).toBe(8);
+
+    // Shopify's retry of the 503
+    await fulfill("gid://shopify/Fulfillment/2", 1);
+
+    expect(shopify.batch(LATER)?.quantity).toBe(7);
+    expect(await db.productLock.count({ where: { shop } })).toBe(0);
+  }, 15_000);
 });

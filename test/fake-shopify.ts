@@ -16,8 +16,9 @@ type Variables = Record<string, unknown>;
 /**
  * An in-memory store answering the app's fulfillment GraphQL operations, so
  * tests can check what Shopify ends up holding after failures and retries.
+ * `delayMs` makes every call take that long, so concurrent work overlaps.
  */
-export function fakeShopify() {
+export function fakeShopify({ delayMs = 0 } = {}) {
   const products = new Map<string, FakeProduct>();
   const batches = new Map<string, FakeBatch>();
   const calls: string[] = [];
@@ -105,6 +106,9 @@ export function fakeShopify() {
     graphql: async (query: string, options?: { variables?: Variables }) => {
       const operation = /(?:query|mutation) (\w+)/.exec(query)![1];
       calls.push(operation);
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
       const remaining = failures.get(operation) ?? 0;
       if (remaining > 0) {
         failures.set(operation, remaining - 1);
