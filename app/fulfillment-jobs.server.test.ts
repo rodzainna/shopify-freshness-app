@@ -10,6 +10,7 @@ import {
 } from "./fulfillment-jobs.server";
 import { unauthenticated } from "./shopify.server";
 import { fakeShopify } from "../test/fake-shopify";
+import { clearShopData } from "../test/shop-data";
 
 vi.mock("./shopify.server", () => ({
   unauthenticated: { admin: vi.fn() },
@@ -46,13 +47,7 @@ const saveJob = () =>
 const job = () =>
   db.fulfillmentJob.findUnique({ where: { shop_fulfillmentId: key } });
 
-async function clearTestData() {
-  const where = { shop };
-  await db.fulfillmentJob.deleteMany({ where });
-  await db.fulfillmentPlan.deleteMany({ where });
-  await db.fulfillmentDiscrepancy.deleteMany({ where });
-  await db.productLock.deleteMany({ where });
-}
+const clearTestData = () => clearShopData([shop]);
 
 beforeEach(async () => {
   vi.spyOn(console, "log").mockImplementation(() => {});
