@@ -23,6 +23,8 @@ export interface FulfillmentContext {
   today: string;
 }
 
+type PlanKey = Pick<FulfillmentPlan, "shop" | "fulfillmentId" | "productId">;
+
 // Reasons that end a product's processing for that fulfillment
 const STOPPING_REASONS: DiscrepancyReason[] = [
   "product_not_found",
@@ -52,20 +54,20 @@ async function processProduct(
   quantity: number,
 ): Promise<void> {
   const { admin, shop, fulfillmentId, today } = context;
+  const key: PlanKey = { shop, fulfillmentId, productId };
 
   // Earlier fulfillments' plans go first, so plans apply in order
   await finishPendingPlans(context, productId);
-  if (await alreadyHandled(shop, fulfillmentId, productId)) return;
+  if (await alreadyHandled(key)) return;
 
   const read = await readProductBatches(admin, productId);
   if ("notTracked" in read) return;
   if ("problem" in read) {
-    await recordStop(shop, fulfillmentId, productId, read.problem);
+    await recordStop(key, read.problem);
     return;
   }
 
   const { plan, shortfall } = planFulfillment(read.batches, quantity, today);
-  const key = { shop, fulfillmentId, productId };
   await db.$transaction([
     db.fulfillmentPlan.create({ data: { ...key, plan: toJson(plan) } }),
     ...(shortfall
@@ -97,10 +99,9 @@ async function finishPlan(
   { admin }: FulfillmentContext,
   row: FulfillmentPlan,
 ): Promise<void> {
-  const { shop, fulfillmentId, productId } = row;
   const plan = row.plan as unknown as FulfillmentPlanData;
 
-  const read = await readProductBatches(admin, productId);
+  const read = await readProductBatches(admin, row.productId);
   if ("problem" in read) {
     await dropPlan(row, read.problem);
     return;
@@ -112,14 +113,19 @@ async function finishPlan(
     await dropPlan(row, "changed_during_retry");
     return;
   }
-  await applyPlan(admin, productId, plan, earliestDateAfterPlan(plan, current));
-  await markApplied({ shop, fulfillmentId, productId });
+  await applyPlan(
+    admin,
+    row.productId,
+    plan,
+    earliestDateAfterPlan(plan, current),
+  );
+  await markApplied(row);
 }
 
 // The discrepancy replaces the plan as the record, so the fulfillment is never
 // recalculated against stock that has changed since.
 async function dropPlan(
-  { shop, fulfillmentId, productId }: FulfillmentPlan,
+  { shop, fulfillmentId, productId }: PlanKey,
   reason: DiscrepancyReason,
 ): Promise<void> {
   const key = { shop, fulfillmentId, productId };
@@ -131,19 +137,14 @@ async function dropPlan(
 }
 
 async function recordStop(
-  shop: string,
-  fulfillmentId: string,
-  productId: string,
+  key: PlanKey,
   reason: DiscrepancyReason,
 ): Promise<void> {
-  await upsertDiscrepancy({ shop, fulfillmentId, productId }, reason);
-  console.warn(`Skipped ${productId} for ${fulfillmentId}: ${reason}`);
+  await upsertDiscrepancy(key, reason);
+  console.warn(`Skipped ${key.productId} for ${key.fulfillmentId}: ${reason}`);
 }
 
-function upsertDiscrepancy(
-  key: { shop: string; fulfillmentId: string; productId: string },
-  reason: DiscrepancyReason,
-) {
+function upsertDiscrepancy(key: PlanKey, reason: DiscrepancyReason) {
   return db.fulfillmentDiscrepancy.upsert({
     where: { shop_fulfillmentId_productId_reason: { ...key, reason } },
     create: { ...key, reason },
@@ -151,36 +152,26 @@ function upsertDiscrepancy(
   });
 }
 
-async function alreadyHandled(
-  shop: string,
-  fulfillmentId: string,
-  productId: string,
-): Promise<boolean> {
+async function alreadyHandled(key: PlanKey): Promise<boolean> {
   const [plan, stop] = await Promise.all([
     db.fulfillmentPlan.findUnique({
-      where: {
-        shop_fulfillmentId_productId: { shop, fulfillmentId, productId },
-      },
+      where: { shop_fulfillmentId_productId: key },
     }),
     db.fulfillmentDiscrepancy.findFirst({
-      where: {
-        shop,
-        fulfillmentId,
-        productId,
-        reason: { in: STOPPING_REASONS },
-      },
+      where: { ...key, reason: { in: STOPPING_REASONS } },
     }),
   ]);
   return plan !== null || stop !== null;
 }
 
-async function markApplied(key: {
-  shop: string;
-  fulfillmentId: string;
-  productId: string;
-}): Promise<void> {
+// Picks the key fields, since callers may pass a whole plan row
+async function markApplied({
+  shop,
+  fulfillmentId,
+  productId,
+}: PlanKey): Promise<void> {
   await db.fulfillmentPlan.update({
-    where: { shop_fulfillmentId_productId: key },
+    where: { shop_fulfillmentId_productId: { shop, fulfillmentId, productId } },
     data: { appliedAt: new Date() },
   });
 }
