@@ -1,7 +1,8 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useLocation, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
+import { DashboardFilterBar, useDashboardFilters } from "../dashboard-filters";
 import { authenticate } from "../shopify.server";
 import {
   type DashboardProductNode,
@@ -16,6 +17,11 @@ import {
   getShopToday,
   isInStock,
 } from "../../shared/freshness";
+import {
+  hasActiveFilters,
+  parseDashboardFilters,
+  toProductQuery,
+} from "../../shared/dashboard-filters";
 import { MAX_BATCHES } from "../../shared/product-metafields";
 
 // One page only in v1. Batches load up to the panel's limit, so totals are
@@ -32,14 +38,19 @@ interface DashboardData {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
+  const filters = parseDashboardFilters(new URL(request.url).searchParams);
 
   const response = await admin.graphql(
     `#graphql
-      query FreshnessDashboard($productLimit: Int!, $batchLimit: Int!) {
+      query FreshnessDashboard(
+        $productLimit: Int!
+        $batchLimit: Int!
+        $query: String
+      ) {
         shop {
           ianaTimezone
         }
-        products(first: $productLimit, sortKey: TITLE) {
+        products(first: $productLimit, sortKey: TITLE, query: $query) {
           nodes {
             id
             legacyResourceId
@@ -81,7 +92,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
         }
       }`,
-    { variables: { productLimit: PRODUCT_LIMIT, batchLimit: MAX_BATCHES } },
+    {
+      variables: {
+        productLimit: PRODUCT_LIMIT,
+        batchLimit: MAX_BATCHES,
+        query: toProductQuery(filters),
+      },
+    },
   );
   // admin.graphql throws on any GraphQL error, so data is complete here
   const { data } = (await response.json()) as { data: DashboardData };
@@ -91,13 +108,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     rows: toDashboardRows(data.products.nodes, today),
     hasMoreProducts: data.products.pageInfo.hasNextPage,
+    filters,
   };
 };
 
 export default function Dashboard() {
-  const { rows, hasMoreProducts } = useLoaderData<typeof loader>();
+  const { rows, hasMoreProducts, filters } = useLoaderData<typeof loader>();
+  const controls = useDashboardFilters(filters);
+  const location = useLocation();
+  const navigation = useNavigation();
+  // Only this page's own reloads, not leaving it for another route
+  const loading =
+    navigation.state === "loading" &&
+    navigation.location.pathname === location.pathname;
+  const filtered = hasActiveFilters(filters);
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && !filtered) {
     return (
       <s-page heading="Freshness overview">
         <s-section>
@@ -120,7 +146,8 @@ export default function Dashboard() {
   return (
     <s-page heading="Freshness overview" inlineSize="large">
       <s-section padding="none">
-        <s-table>
+        <s-table loading={loading || undefined}>
+          <DashboardFilterBar filters={filters} controls={controls} />
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
             <s-table-header listSlot="secondary">Status</s-table-header>
@@ -217,6 +244,16 @@ export default function Dashboard() {
             ))}
           </s-table-body>
         </s-table>
+        {rows.length === 0 && (
+          <s-box padding="base">
+            <s-stack gap="small-200" alignItems="center">
+              <s-text>No products match.</s-text>
+              <s-button variant="tertiary" onClick={controls.clearAll}>
+                Clear filters
+              </s-button>
+            </s-stack>
+          </s-box>
+        )}
       </s-section>
       {hasMoreProducts && (
         <s-paragraph color="subdued">
