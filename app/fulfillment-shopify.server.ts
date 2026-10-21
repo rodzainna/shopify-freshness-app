@@ -9,6 +9,7 @@ import {
   MAX_BATCHES,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
   type SaveProductFreshnessData,
+  type BatchNode,
   type UserErrorsPayload,
   isReadableBatch,
   saveProductFreshnessVariables,
@@ -45,12 +46,6 @@ export async function readShopToday(
       }`,
   );
   return getShopToday(data.shop.ianaTimezone, now);
-}
-
-interface BatchNode {
-  id?: string;
-  quantity?: { value: string } | null;
-  expirationDate?: { value: string } | null;
 }
 
 interface ProductBatchesData {

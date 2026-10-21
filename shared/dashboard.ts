@@ -5,13 +5,7 @@ import {
   computeBatchFreshness,
   isCalendarDate,
 } from "./freshness";
-import { isReadableBatch } from "./product-metafields";
-
-interface BatchNode {
-  id?: string;
-  quantity?: { value: string } | null;
-  expirationDate?: { value: string } | null;
-}
+import { type BatchNode, isReadableBatch } from "./product-metafields";
 
 // The dashboard query's product shape (see app/routes/app._index.tsx)
 export interface DashboardProductNode {

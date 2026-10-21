@@ -142,6 +142,7 @@ async function loadPanelData(productId: string): Promise<LoadedPanelData> {
 
   // No metafield yet (product never saved) -> start with an empty list
   const nodes = data.product.freshnessBatches?.references.nodes ?? [];
+  // Saving a list with a batch that didn't resolve would unlink it
   if (!nodes.every(isReadableBatch)) {
     throw new Error(
       "Some batches couldn't be read, so editing is turned off to keep them linked. Try again later.",

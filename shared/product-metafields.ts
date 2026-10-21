@@ -10,6 +10,13 @@ export interface MetafieldIdentifier {
   key: string;
 }
 
+// A batch as the dashboard and fulfillment queries read it
+export interface BatchNode {
+  id?: string;
+  quantity?: { value: string } | null;
+  expirationDate?: { value: string } | null;
+}
+
 // Shopify returns null for a batch reference that no longer resolves.
 // Writing back a list with one would unlink it, so callers stop instead.
 export function isReadableBatch<T extends { id?: string }>(
