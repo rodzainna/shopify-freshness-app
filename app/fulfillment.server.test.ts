@@ -231,7 +231,7 @@ describe("processFulfillment", () => {
     shopify.addProduct(otherProductId, {
       [OTHER]: { quantity: 4, expirationDate: "2026-11-01" },
     });
-    shopify.rejectNext("SetBatchQuantity");
+    shopify.rejectNext("SetBatchFields");
 
     await processFulfillment(
       {
@@ -268,7 +268,7 @@ describe("processFulfillment", () => {
     // Quantities are written, then the list write fails on the network
     shopify.failNext("SaveProductFreshness");
     await expect(fulfill("gid://shopify/Fulfillment/1", 5)).rejects.toThrow();
-    shopify.rejectNext("SetBatchQuantity");
+    shopify.rejectNext("SetBatchFields");
 
     await fulfill("gid://shopify/Fulfillment/2", 1);
 

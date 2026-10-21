@@ -25,10 +25,12 @@ export function fakeShopify({ delayMs = 0 } = {}) {
   const calls: string[] = [];
   // Operation name → how many more calls should fail before succeeding
   const failures = new Map<string, number>();
+  // Operation name → how many more calls apply but then fail like a timeout
+  const lostResponses = new Map<string, number>();
   // Operation name → how many more calls Shopify should reject
   const rejections = new Map<string, number>();
   const payloadField: Record<string, string> = {
-    SetBatchQuantity: "metaobjectUpdate",
+    SetBatchFields: "metaobjectUpdate",
     SaveProductFreshness: "metafieldsSet",
     DeleteBatch: "metaobjectDelete",
   };
@@ -43,9 +45,15 @@ export function fakeShopify({ delayMs = 0 } = {}) {
     GetProductBatches: ({ productId }) => {
       const product = products.get(productId as string);
       if (!product) return { product: null };
-      if (!product.batchIds) return { product: { freshnessBatches: null } };
+      const earliestExpiration = product.earliestExpirationDate
+        ? { value: product.earliestExpirationDate }
+        : null;
+      if (!product.batchIds) {
+        return { product: { earliestExpiration, freshnessBatches: null } };
+      }
       return {
         product: {
+          earliestExpiration,
           freshnessBatches: {
             references: {
               // A batch that isn't stored comes back as null, like Shopify
@@ -64,14 +72,21 @@ export function fakeShopify({ delayMs = 0 } = {}) {
         },
       };
     },
-    SetBatchQuantity: ({ id, quantity }) => {
+    SetBatchFields: ({ id, metaobject }) => {
       const batch = batches.get(id as string);
       if (!batch) {
         return {
           metaobjectUpdate: userError("Record not found", "RECORD_NOT_FOUND"),
         };
       }
-      batch.quantity = Number(quantity);
+      // Applies only the fields the mutation sends
+      const { fields } = metaobject as {
+        fields: { key: string; value: string }[];
+      };
+      for (const { key, value } of fields) {
+        if (key === "quantity") batch.quantity = Number(value);
+        if (key === "expiration_date") batch.expirationDate = value;
+      }
       return { metaobjectUpdate: ok };
     },
     SaveProductFreshness: (variables) => {
@@ -124,9 +139,14 @@ export function fakeShopify({ delayMs = 0 } = {}) {
           },
         });
       }
-      return Response.json({
-        data: answer[operation](options?.variables ?? {}),
-      });
+      const data = answer[operation](options?.variables ?? {});
+      // The write landed, but the response never arrived
+      const lostLeft = lostResponses.get(operation) ?? 0;
+      if (lostLeft > 0) {
+        lostResponses.set(operation, lostLeft - 1);
+        throw new Error(`Simulated timeout after ${operation}`);
+      }
+      return Response.json({ data });
     },
   } as unknown as AdminApiContext;
 
@@ -152,6 +172,9 @@ export function fakeShopify({ delayMs = 0 } = {}) {
     },
     rejectNext(operation: string, times = 1) {
       rejections.set(operation, times);
+    },
+    loseResponseNext(operation: string, times = 1) {
+      lostResponses.set(operation, times);
     },
     product: (productId: string) => products.get(productId),
     batch: (id: string) => batches.get(id),

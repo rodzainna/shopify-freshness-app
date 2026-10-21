@@ -33,7 +33,7 @@ function fakeAdmin(responses: Record<string, (variables: never) => unknown>) {
 
 const noUserErrors = { userErrors: [] };
 const writesSucceed = {
-  SetBatchQuantity: () => ({ metaobjectUpdate: noUserErrors }),
+  SetBatchFields: () => ({ metaobjectUpdate: noUserErrors }),
   SaveProductFreshness: () => ({
     metafieldsSet: noUserErrors,
     metafieldsDelete: null,
@@ -89,6 +89,7 @@ describe("readProductBatches", () => {
           expirationDate: "2026-10-22",
         },
       ],
+      earliestExpirationDate: null,
     });
     expect(calls[0].variables).toStrictEqual({ productId, maxBatches: 250 });
   });
@@ -103,6 +104,7 @@ describe("readProductBatches", () => {
       batches: [
         { id: "gid://shopify/Metaobject/1", quantity: 0, expirationDate: "" },
       ],
+      earliestExpirationDate: null,
     });
   });
 
@@ -123,6 +125,24 @@ describe("readProductBatches", () => {
 
     expect(await readProductBatches(admin, productId)).toStrictEqual({
       batches: [],
+      earliestExpirationDate: null,
+    });
+  });
+
+  it("reads the stored earliest date", async () => {
+    const { admin } = fakeAdmin({
+      GetProductBatches: () => ({
+        product: {
+          earliestExpiration: { value: "2026-10-22" },
+          freshnessBatches: {
+            references: { nodes: [], pageInfo: { hasNextPage: false } },
+          },
+        },
+      }),
+    });
+
+    expect(await readProductBatches(admin, productId)).toMatchObject({
+      earliestExpirationDate: "2026-10-22",
     });
   });
 
@@ -189,8 +209,11 @@ describe("applyPlan", () => {
 
     expect(calls).toStrictEqual([
       {
-        operation: "SetBatchQuantity",
-        variables: { id: "gid://shopify/Metaobject/2", quantity: "8" },
+        operation: "SetBatchFields",
+        variables: {
+          id: "gid://shopify/Metaobject/2",
+          metaobject: { fields: [{ key: "quantity", value: "8" }] },
+        },
       },
       {
         operation: "SaveProductFreshness",
@@ -233,8 +256,8 @@ describe("applyPlan", () => {
     await applyPlan(admin, productId, wider, null);
 
     expect(calls.map(({ operation }) => operation)).toStrictEqual([
-      "SetBatchQuantity",
-      "SetBatchQuantity",
+      "SetBatchFields",
+      "SetBatchFields",
       "SaveProductFreshness",
       "DeleteBatch",
       "DeleteBatch",
@@ -261,7 +284,7 @@ describe("applyPlan", () => {
         const userErrors = failIds.includes(id)
           ? [{ message: `Rejected ${id}`, code: "INVALID" }]
           : [];
-        const data = query.includes("SetBatchQuantity")
+        const data = query.includes("SetBatchFields")
           ? { metaobjectUpdate: { userErrors } }
           : { metafieldsSet: noUserErrors };
         return Response.json({ data });
@@ -318,7 +341,7 @@ describe("applyPlan", () => {
   it("doesn't write the list when any quantity is rejected", async () => {
     const { admin, calls } = fakeAdmin({
       ...writesSucceed,
-      SetBatchQuantity: ({ id }: { id: string }) => ({
+      SetBatchFields: ({ id }: { id: string }) => ({
         metaobjectUpdate: {
           userErrors:
             id === "gid://shopify/Metaobject/3"
@@ -362,7 +385,7 @@ describe("applyPlan", () => {
   it("stops before later writes when a quantity is rejected", async () => {
     const { admin, calls } = fakeAdmin({
       ...writesSucceed,
-      SetBatchQuantity: () => ({
+      SetBatchFields: () => ({
         metaobjectUpdate: {
           userErrors: [
             { message: "Record not found", code: "RECORD_NOT_FOUND" },
@@ -395,7 +418,7 @@ describe("applyPlan", () => {
   it("keeps a network failure retryable alongside a rejection", async () => {
     const { admin } = fakeAdmin({
       ...writesSucceed,
-      SetBatchQuantity: ({ id }: { id: string }) => {
+      SetBatchFields: ({ id }: { id: string }) => {
         if (id === "gid://shopify/Metaobject/2") throw new Error("Timed out");
         return {
           metaobjectUpdate: { userErrors: [{ message: "Invalid value" }] },

@@ -9,6 +9,7 @@ import {
   MAX_BATCHES,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
   type SaveProductFreshnessData,
+  saveEarliestDateVariables,
   type BatchNode,
   type UserErrorsPayload,
   isReadableBatch,
@@ -50,6 +51,7 @@ export async function readShopToday(
 
 interface ProductBatchesData {
   product: {
+    earliestExpiration: { value: string } | null;
     freshnessBatches: {
       references: {
         // null for a batch that no longer resolves
@@ -62,7 +64,7 @@ interface ProductBatchesData {
 
 // notTracked: the product has no batch list, so the app has nothing to update
 export type ProductBatches =
-  | { batches: StoredBatch[] }
+  | { batches: StoredBatch[]; earliestExpirationDate: string | null }
   | { notTracked: true }
   | { problem: "product_not_found" | "too_many_batches" };
 
@@ -75,6 +77,9 @@ export async function readProductBatches(
     `#graphql
       query GetProductBatches($productId: ID!, $maxBatches: Int!) {
         product(id: $productId) {
+          earliestExpiration: metafield(key: "earliest_expiration_date") {
+            value
+          }
           freshnessBatches: metafield(key: "freshness_batches") {
             references(first: $maxBatches) {
               nodes {
@@ -115,6 +120,7 @@ export async function readProductBatches(
       quantity: Number(node.quantity?.value ?? 0),
       expirationDate: node.expirationDate?.value ?? "",
     })),
+    earliestExpirationDate: product.earliestExpiration?.value ?? null,
   };
 }
 
@@ -132,23 +138,64 @@ export async function applyPlan(
   await writeEach(plan.updates, ({ id, after }) =>
     setBatchQuantity(admin, id, after),
   );
+  await saveProductFreshness(
+    admin,
+    productId,
+    plan.batchIds,
+    earliestExpirationDate,
+  );
+  await writeEach(plan.deletes, ({ id }) => deleteBatch(admin, id));
+}
 
+/** Writes the batch list and earliest date, deleting either when empty. */
+export async function saveProductFreshness(
+  admin: AdminApiContext,
+  productId: string,
+  batchIds: string[],
+  earliestExpirationDate: string | null,
+): Promise<void> {
   const freshness = await query<SaveProductFreshnessData>(
     admin,
     SAVE_PRODUCT_FRESHNESS_MUTATION,
-    saveProductFreshnessVariables(
-      productId,
-      plan.batchIds,
-      earliestExpirationDate,
-    ),
+    saveProductFreshnessVariables(productId, batchIds, earliestExpirationDate),
   );
   throwOnUserErrors(
     `Saving product ${productId} freshness`,
     freshness.metafieldsSet?.userErrors,
     freshness.metafieldsDelete?.userErrors,
   );
+}
 
-  await writeEach(plan.deletes, ({ id }) => deleteBatch(admin, id));
+/** Writes only the product's earliest date, deleting it when null. */
+export async function saveEarliestExpirationDate(
+  admin: AdminApiContext,
+  productId: string,
+  earliestExpirationDate: string | null,
+): Promise<void> {
+  const data = await query<SaveProductFreshnessData>(
+    admin,
+    SAVE_PRODUCT_FRESHNESS_MUTATION,
+    saveEarliestDateVariables(productId, earliestExpirationDate),
+  );
+  throwOnUserErrors(
+    `Saving product ${productId} earliest date`,
+    data.metafieldsSet?.userErrors,
+    data.metafieldsDelete?.userErrors,
+  );
+}
+
+/**
+ * Sets each batch's quantity and date. Every write settles before this
+ * returns; the result lists the ones that failed.
+ */
+export async function writeBatchValues(
+  admin: AdminApiContext,
+  batches: StoredBatch[],
+): Promise<{ batch: StoredBatch; error: unknown }[]> {
+  const failures = await settleEach(batches, (batch) =>
+    setBatchValues(admin, batch),
+  );
+  return failures.map(({ item, error }) => ({ batch: item, error }));
 }
 
 // Enough to overlap round trips without spending Shopify's rate limit at once
@@ -156,20 +203,31 @@ const MAX_WRITES_IN_FLIGHT = 10;
 
 /**
  * Runs independent writes in groups, waiting for every one to settle so none
- * is still landing after this returns. Throws once, listing every failure.
+ * is still landing after this returns. Returns the ones that failed.
  */
+async function settleEach<T>(
+  items: T[],
+  write: (item: T) => Promise<void>,
+): Promise<{ item: T; error: unknown }[]> {
+  const failures: { item: T; error: unknown }[] = [];
+  for (let start = 0; start < items.length; start += MAX_WRITES_IN_FLIGHT) {
+    const group = items.slice(start, start + MAX_WRITES_IN_FLIGHT);
+    const results = await Promise.allSettled(group.map(write));
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        failures.push({ item: group[index], error: result.reason });
+      }
+    });
+  }
+  return failures;
+}
+
+/** Like settleEach, but throws once, listing every failure. */
 async function writeEach<T>(
   items: T[],
   write: (item: T) => Promise<void>,
 ): Promise<void> {
-  const errors: unknown[] = [];
-  for (let start = 0; start < items.length; start += MAX_WRITES_IN_FLIGHT) {
-    const group = items.slice(start, start + MAX_WRITES_IN_FLIGHT);
-    const results = await Promise.allSettled(group.map(write));
-    for (const result of results) {
-      if (result.status === "rejected") errors.push(result.reason);
-    }
-  }
+  const errors = (await settleEach(items, write)).map(({ error }) => error);
 
   if (errors.length === 1) throw errors[0];
   if (errors.length > 1) {
@@ -185,21 +243,39 @@ async function writeEach<T>(
   }
 }
 
-async function setBatchQuantity(
+function setBatchQuantity(
   admin: AdminApiContext,
   id: string,
   quantity: number,
+): Promise<void> {
+  return setBatchFields(admin, id, `Setting batch ${id} quantity`, [
+    { key: "quantity", value: String(quantity) },
+  ]);
+}
+
+function setBatchValues(
+  admin: AdminApiContext,
+  { id, quantity, expirationDate }: StoredBatch,
+): Promise<void> {
+  return setBatchFields(admin, id, `Saving batch ${id}`, [
+    { key: "quantity", value: String(quantity) },
+    { key: "expiration_date", value: expirationDate },
+  ]);
+}
+
+async function setBatchFields(
+  admin: AdminApiContext,
+  id: string,
+  action: string,
+  fields: { key: "quantity" | "expiration_date"; value: string }[],
 ): Promise<void> {
   const data = await query<{
     metaobjectUpdate: UserErrorsPayload | null;
   }>(
     admin,
     `#graphql
-      mutation SetBatchQuantity($id: ID!, $quantity: String!) {
-        metaobjectUpdate(
-          id: $id
-          metaobject: { fields: [{ key: "quantity", value: $quantity }] }
-        ) {
+      mutation SetBatchFields($id: ID!, $metaobject: MetaobjectUpdateInput!) {
+        metaobjectUpdate(id: $id, metaobject: $metaobject) {
           userErrors {
             field
             message
@@ -207,12 +283,9 @@ async function setBatchQuantity(
           }
         }
       }`,
-    { id, quantity: String(quantity) },
+    { id, metaobject: { fields } },
   );
-  throwOnUserErrors(
-    `Setting batch ${id} quantity`,
-    data.metaobjectUpdate?.userErrors,
-  );
+  throwOnUserErrors(action, data.metaobjectUpdate?.userErrors);
 }
 
 async function deleteBatch(admin: AdminApiContext, id: string): Promise<void> {

@@ -49,21 +49,22 @@ export function planProductMetafieldWrites(
     });
   }
 
-  if (earliestExpirationDate) {
-    set.push({
-      ownerId: productId,
-      key: "earliest_expiration_date",
-      value: earliestExpirationDate,
-    });
-  } else {
-    toDelete.push({
-      ownerId: productId,
-      namespace: "$app",
-      key: "earliest_expiration_date",
-    });
-  }
+  const date = planEarliestDateWrite(productId, earliestExpirationDate);
+  return { set: [...set, ...date.set], delete: [...toDelete, ...date.delete] };
+}
 
-  return { set, delete: toDelete };
+// Just the earliest date, for saves that leave the batch list alone
+export function planEarliestDateWrite(
+  productId: string,
+  earliestExpirationDate: string | null,
+): { set: MetafieldWrite[]; delete: MetafieldIdentifier[] } {
+  const key = "earliest_expiration_date";
+  return earliestExpirationDate
+    ? {
+        set: [{ ownerId: productId, key, value: earliestExpirationDate }],
+        delete: [],
+      }
+    : { set: [], delete: [{ ownerId: productId, namespace: "$app", key }] };
 }
 
 // Shopify's largest page size; the app loads a product's batches in one request
@@ -111,11 +112,24 @@ export function saveProductFreshnessVariables(
   batchIds: string[],
   earliestExpirationDate: string | null,
 ) {
-  const writes = planProductMetafieldWrites(
-    productId,
-    batchIds,
-    earliestExpirationDate,
+  return toMutationVariables(
+    planProductMetafieldWrites(productId, batchIds, earliestExpirationDate),
   );
+}
+
+export function saveEarliestDateVariables(
+  productId: string,
+  earliestExpirationDate: string | null,
+) {
+  return toMutationVariables(
+    planEarliestDateWrite(productId, earliestExpirationDate),
+  );
+}
+
+function toMutationVariables(writes: {
+  set: MetafieldWrite[];
+  delete: MetafieldIdentifier[];
+}) {
   return {
     set: writes.set,
     delete: writes.delete,
