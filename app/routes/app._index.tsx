@@ -5,6 +5,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import {
   type DashboardProductNode,
+  type DashboardRow,
+  UNREADABLE,
   toDashboardRows,
 } from "../../shared/dashboard";
 import {
@@ -117,19 +119,16 @@ export default function Dashboard() {
               <s-table-row key={row.id}>
                 <s-table-cell>{row.title}</s-table-cell>
                 <s-table-cell>
-                  <s-badge
-                    tone={
-                      row.status === "Not set"
-                        ? undefined
-                        : FRESHNESS_TONE[row.status]
-                    }
-                  >
-                    {row.status}
-                  </s-badge>
+                  <s-badge tone={statusTone(row.status)}>{row.status}</s-badge>
                 </s-table-cell>
                 <s-table-cell>{row.earliestExpirationDate ?? "—"}</s-table-cell>
                 <s-table-cell>
                   <s-stack gap="small-200">
+                    {row.status === UNREADABLE && (
+                      <s-text color="subdued">
+                        {"Batch details couldn't be loaded"}
+                      </s-text>
+                    )}
                     {row.batches.map((batch) => (
                       <s-stack
                         key={batch.id}
@@ -175,6 +174,12 @@ export default function Dashboard() {
       <PrivacyLink />
     </s-page>
   );
+}
+
+function statusTone(status: DashboardRow["status"]) {
+  if (status === "Not set") return undefined;
+  if (status === UNREADABLE) return "warning";
+  return FRESHNESS_TONE[status];
 }
 
 function PrivacyLink() {
