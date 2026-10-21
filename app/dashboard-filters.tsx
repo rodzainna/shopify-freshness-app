@@ -9,10 +9,20 @@ import {
 import {
   type DashboardFilters,
   FILTER_PARAMS,
+  STATUS_FILTERS,
+  STOCK_FILTERS,
 } from "../shared/dashboard-filters";
 import type { FilterOptions } from "./routes/app.filter-options";
 
 const SEARCH_DELAY_MS = 300;
+
+interface Option {
+  value: string;
+  label: string;
+}
+
+const STATUS_OPTIONS = toOptions(STATUS_FILTERS);
+const STOCK_OPTIONS = toOptions(STOCK_FILTERS);
 
 type UpdateParams = (params: URLSearchParams) => void;
 
@@ -109,9 +119,23 @@ export function DashboardFilterBar({
         onInput={(event) => controls.search(event.currentTarget.value)}
       />
       <FilterButton
+        id="status-filter"
+        label="Status"
+        options={STATUS_OPTIONS}
+        selected={filters.statuses}
+        onApply={(values) => controls.setFilter(FILTER_PARAMS.status, values)}
+      />
+      <FilterButton
+        id="stock-filter"
+        label="Stock"
+        options={STOCK_OPTIONS}
+        selected={filters.stock}
+        onApply={(values) => controls.setFilter(FILTER_PARAMS.stock, values)}
+      />
+      <FilterButton
         id="type-filter"
         label="Type"
-        options={options.data?.types}
+        options={options.data?.types.map(sameLabel)}
         selected={filters.types}
         onOpen={loadOptions}
         onApply={(values) => controls.setFilter(FILTER_PARAMS.type, values)}
@@ -119,10 +143,20 @@ export function DashboardFilterBar({
       <FilterButton
         id="vendor-filter"
         label="Vendor"
-        options={options.data?.vendors}
+        options={options.data?.vendors.map(sameLabel)}
         selected={filters.vendors}
         onOpen={loadOptions}
         onApply={(values) => controls.setFilter(FILTER_PARAMS.vendor, values)}
+      />
+      <s-checkbox
+        label="Tracked only"
+        checked={filters.tracked || undefined}
+        onChange={(event) =>
+          controls.setFilter(
+            FILTER_PARAMS.tracked,
+            event.currentTarget.checked ? ["1"] : [],
+          )
+        }
       />
     </s-stack>
   );
@@ -139,14 +173,18 @@ function FilterButton({
   id: string;
   label: string;
   // undefined until loaded
-  options: string[] | undefined;
+  options: Option[] | undefined;
   selected: string[];
-  onOpen: () => void;
+  onOpen?: () => void;
   onApply: (values: string[]) => void;
 }) {
   const [draft, setDraft] = useState(selected);
   // Keep selected values that aren't in the list (renamed, or past its limit) so they can be unticked
-  const choices = [...new Set([...(options ?? []), ...selected])];
+  const listed = new Set(options?.map(({ value }) => value));
+  const choices = [
+    ...(options ?? []),
+    ...selected.filter((value) => !listed.has(value)).map(sameLabel),
+  ];
 
   return (
     <>
@@ -155,10 +193,13 @@ function FilterButton({
         onClick={() => {
           // Start from what's applied, dropping changes from a dismissed popover
           setDraft(selected);
-          onOpen();
+          onOpen?.();
         }}
       >
-        {buttonText(label, selected)}
+        {buttonText(
+          label,
+          selected.map((value) => labelOf(choices, value)),
+        )}
       </s-button>
       <s-popover id={id}>
         <s-box padding="base">
@@ -174,12 +215,12 @@ function FilterButton({
             >
               {choices.map((choice) => (
                 <s-choice
-                  key={choice}
-                  value={choice}
+                  key={choice.value}
+                  value={choice.value}
                   // React 18 renders false as the string "false", which counts as set
-                  selected={draft.includes(choice) || undefined}
+                  selected={draft.includes(choice.value) || undefined}
                 >
-                  {choice}
+                  {choice.label}
                 </s-choice>
               ))}
             </s-choice-list>
@@ -212,4 +253,17 @@ function buttonText(label: string, selected: string[]) {
   if (selected.length === 0) return label;
   if (selected.length === 1) return `${label}: ${selected[0]}`;
   return `${label}: ${selected.length} selected`;
+}
+
+function toOptions(labels: Record<string, string>): Option[] {
+  return Object.entries(labels).map(([value, label]) => ({ value, label }));
+}
+
+// Types and vendors are shown as they're stored
+function sameLabel(value: string): Option {
+  return { value, label: value };
+}
+
+function labelOf(options: Option[], value: string): string {
+  return options.find((option) => option.value === value)?.label ?? value;
 }

@@ -18,7 +18,9 @@ import {
   isInStock,
 } from "../../shared/freshness";
 import {
+  filterRows,
   hasActiveFilters,
+  hasRowFilters,
   parseDashboardFilters,
   toProductQuery,
 } from "../../shared/dashboard-filters";
@@ -106,7 +108,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const today = getShopToday(data.shop.ianaTimezone, new Date());
 
   return {
-    rows: toDashboardRows(data.products.nodes, today),
+    rows: filterRows(toDashboardRows(data.products.nodes, today), filters),
     hasMoreProducts: data.products.pageInfo.hasNextPage,
     filters,
   };
@@ -257,7 +259,9 @@ export default function Dashboard() {
       </s-section>
       {hasMoreProducts && (
         <s-paragraph color="subdued">
-          Showing the first {PRODUCT_LIMIT} products by title.
+          {hasRowFilters(filters)
+            ? `Status, stock and tracked filters cover the first ${PRODUCT_LIMIT} products. Search or filter by type to narrow it down.`
+            : `Showing the first ${PRODUCT_LIMIT} products by title.`}
         </s-paragraph>
       )}
       <PrivacyLink />
