@@ -1,7 +1,8 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useNavigation, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
+import { DashboardFilterBar } from "../dashboard-filters";
 import { authenticate } from "../shopify.server";
 import {
   type DashboardProductNode,
@@ -16,14 +17,25 @@ import {
   getShopToday,
   isInStock,
 } from "../../shared/freshness";
+import {
+  FILTER_PARAMS,
+  hasActiveFilters,
+  parseDashboardFilters,
+  toProductQuery,
+} from "../../shared/dashboard-filters";
 import { MAX_BATCHES } from "../../shared/product-metafields";
 
 // One page only in v1. Batches load up to the panel's limit, so totals are
 // complete unless a product has more; at 250 the query requests 269 of 1,000 points.
 const PRODUCT_LIMIT = 50;
 
+// Choices for the Type and Vendor filters, from the whole store
+const OPTION_LIMIT = 250;
+
 interface DashboardData {
   shop: { ianaTimezone: string };
+  productTypes: { nodes: string[] };
+  productVendors: { nodes: string[] };
   products: {
     nodes: DashboardProductNode[];
     pageInfo: { hasNextPage: boolean };
@@ -32,14 +44,26 @@ interface DashboardData {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
+  const filters = parseDashboardFilters(new URL(request.url).searchParams);
 
   const response = await admin.graphql(
     `#graphql
-      query FreshnessDashboard($productLimit: Int!, $batchLimit: Int!) {
+      query FreshnessDashboard(
+        $productLimit: Int!
+        $batchLimit: Int!
+        $optionLimit: Int!
+        $query: String
+      ) {
         shop {
           ianaTimezone
         }
-        products(first: $productLimit, sortKey: TITLE) {
+        productTypes(first: $optionLimit) {
+          nodes
+        }
+        productVendors(first: $optionLimit) {
+          nodes
+        }
+        products(first: $productLimit, sortKey: TITLE, query: $query) {
           nodes {
             id
             legacyResourceId
@@ -81,7 +105,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
         }
       }`,
-    { variables: { productLimit: PRODUCT_LIMIT, batchLimit: MAX_BATCHES } },
+    {
+      variables: {
+        productLimit: PRODUCT_LIMIT,
+        batchLimit: MAX_BATCHES,
+        optionLimit: OPTION_LIMIT,
+        query: toProductQuery(filters),
+      },
+    },
   );
   // admin.graphql throws on any GraphQL error, so data is complete here
   const { data } = (await response.json()) as { data: DashboardData };
@@ -91,13 +122,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     rows: toDashboardRows(data.products.nodes, today),
     hasMoreProducts: data.products.pageInfo.hasNextPage,
+    filters,
+    types: data.productTypes.nodes,
+    vendors: data.productVendors.nodes,
   };
 };
 
 export default function Dashboard() {
-  const { rows, hasMoreProducts } = useLoaderData<typeof loader>();
+  const { rows, hasMoreProducts, filters, types, vendors } =
+    useLoaderData<typeof loader>();
+  const [, setSearchParams] = useSearchParams();
+  const loading = useNavigation().state === "loading";
+  const filtered = hasActiveFilters(filters);
 
-  if (rows.length === 0) {
+  function clearFilters() {
+    setSearchParams((params) => {
+      for (const name of Object.values(FILTER_PARAMS)) params.delete(name);
+      return params;
+    });
+  }
+
+  if (rows.length === 0 && !filtered) {
     return (
       <s-page heading="Freshness overview">
         <s-section>
@@ -120,7 +165,12 @@ export default function Dashboard() {
   return (
     <s-page heading="Freshness overview" inlineSize="large">
       <s-section padding="none">
-        <s-table>
+        <s-table loading={loading || undefined}>
+          <DashboardFilterBar
+            filters={filters}
+            types={types}
+            vendors={vendors}
+          />
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
             <s-table-header listSlot="secondary">Status</s-table-header>
@@ -217,6 +267,16 @@ export default function Dashboard() {
             ))}
           </s-table-body>
         </s-table>
+        {rows.length === 0 && (
+          <s-box padding="base">
+            <s-stack gap="small-200" alignItems="center">
+              <s-text>No products match.</s-text>
+              <s-button variant="tertiary" onClick={clearFilters}>
+                Clear filters
+              </s-button>
+            </s-stack>
+          </s-box>
+        )}
       </s-section>
       {hasMoreProducts && (
         <s-paragraph color="subdued">
