@@ -126,12 +126,16 @@ describe("readProductBatches", () => {
     });
   });
 
-  it("refuses a list with a batch it can't identify", async () => {
+  // null is what Shopify returns for a batch that no longer resolves
+  it.each([
+    ["no longer resolves", null],
+    ["has no id", {}],
+  ])("refuses a list with a batch that %s", async (_case, node) => {
     const { admin } = fakeAdmin({
       GetProductBatches: () =>
         batchesResponse([
           { id: "gid://shopify/Metaobject/1", quantity: { value: "3" } },
-          {},
+          node,
         ]),
     });
 

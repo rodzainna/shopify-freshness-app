@@ -5,6 +5,7 @@ import {
   computeBatchFreshness,
   isCalendarDate,
 } from "./freshness";
+import { type BatchNode, isReadableBatch } from "./product-metafields";
 
 // The dashboard query's product shape (see app/routes/app._index.tsx)
 export interface DashboardProductNode {
@@ -13,11 +14,8 @@ export interface DashboardProductNode {
   earliestExpiration: { value: string } | null;
   freshnessBatches: {
     references: {
-      nodes: {
-        id?: string;
-        quantity?: { value: string } | null;
-        expirationDate?: { value: string } | null;
-      }[];
+      // null for a batch that no longer resolves
+      nodes: (BatchNode | null)[];
       pageInfo: { hasNextPage: boolean };
     };
   } | null;
@@ -31,12 +29,15 @@ export interface DashboardBatch {
   freshness: BatchFreshness | null;
 }
 
+// A batch in the list didn't resolve, so the row can't show a status
+export const UNREADABLE = "Can't read batches";
+
 export interface DashboardRow {
   id: string;
   title: string;
   earliestExpirationDate: string | null;
   // Worst status among in-stock batches (computeAggregateFreshness)
-  status: FreshnessStatus | "Not set";
+  status: FreshnessStatus | "Not set" | typeof UNREADABLE;
   batches: DashboardBatch[];
   // The query loads a limited number of batches per product
   hasMoreBatches: boolean;
@@ -46,12 +47,22 @@ export function toDashboardRows(
   products: DashboardProductNode[],
   today: string,
 ): DashboardRow[] {
-  return products.map((product) => {
+  return products.map((product): DashboardRow => {
     const references = product.freshnessBatches?.references;
-    const batches = (references?.nodes ?? []).map((node) => {
+    const nodes = references?.nodes ?? [];
+    const row = {
+      id: product.id,
+      title: product.title,
+      earliestExpirationDate: product.earliestExpiration?.value ?? null,
+    };
+    if (!nodes.every(isReadableBatch)) {
+      return { ...row, status: UNREADABLE, batches: [], hasMoreBatches: false };
+    }
+
+    const batches = nodes.map((node) => {
       const expirationDate = node.expirationDate?.value ?? "";
       return {
-        id: node.id ?? "",
+        id: node.id,
         quantity: Number(node.quantity?.value ?? 0),
         expirationDate,
         freshness: isCalendarDate(expirationDate)
@@ -61,9 +72,7 @@ export function toDashboardRows(
     });
 
     return {
-      id: product.id,
-      title: product.title,
-      earliestExpirationDate: product.earliestExpiration?.value ?? null,
+      ...row,
       status: computeAggregateFreshness(batches, today),
       batches,
       hasMoreBatches: references?.pageInfo.hasNextPage ?? false,

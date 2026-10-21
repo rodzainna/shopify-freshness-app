@@ -1,9 +1,20 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  isReadableBatch,
   planProductMetafieldWrites,
   saveProductFreshnessVariables,
 } from "./product-metafields";
+
+describe("isReadableBatch", () => {
+  it("accepts a batch with an id", () => {
+    expect(isReadableBatch({ id: "gid://shopify/Metaobject/1" })).toBe(true);
+  });
+
+  it.each([null, {}, { id: "" }])("rejects %j", (node) => {
+    expect(isReadableBatch(node)).toBe(false);
+  });
+});
 
 describe("planProductMetafieldWrites", () => {
   const productId = "gid://shopify/Product/1";

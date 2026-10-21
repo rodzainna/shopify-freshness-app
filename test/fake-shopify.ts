@@ -48,10 +48,10 @@ export function fakeShopify({ delayMs = 0 } = {}) {
         product: {
           freshnessBatches: {
             references: {
-              // A batch that isn't stored comes back without an id
+              // A batch that isn't stored comes back as null, like Shopify
               nodes: product.batchIds.map((id) => {
                 const batch = batches.get(id);
-                if (!batch) return {};
+                if (!batch) return null;
                 return {
                   id,
                   quantity: { value: String(batch.quantity) },

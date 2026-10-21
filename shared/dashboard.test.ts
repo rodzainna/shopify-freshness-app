@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 
-import { type DashboardProductNode, toDashboardRows } from "./dashboard";
+import {
+  type DashboardProductNode,
+  UNREADABLE,
+  toDashboardRows,
+} from "./dashboard";
 
 const TODAY = "2026-10-19";
 
@@ -96,6 +100,46 @@ describe("toDashboardRows", () => {
     );
 
     expect(row.hasMoreBatches).toBe(true);
+  });
+
+  // null is what Shopify returns for a batch that no longer resolves
+  it.each([
+    ["no longer resolves", null],
+    ["has no id", {}],
+  ])("can't show a status when a batch %s", (_case, node) => {
+    const rows = toDashboardRows(
+      [
+        product({
+          earliestExpiration: { value: "2026-10-10" },
+          freshnessBatches: {
+            references: {
+              nodes: [
+                batch("gid://shopify/Metaobject/1", "3", "2026-11-01"),
+                node,
+              ],
+              pageInfo: { hasNextPage: false },
+            },
+          },
+        }),
+        product({ id: "gid://shopify/Product/2" }),
+      ],
+      TODAY,
+    );
+
+    expect(rows).toStrictEqual([
+      {
+        id: "gid://shopify/Product/1",
+        title: "Sourdough loaf",
+        earliestExpirationDate: "2026-10-10",
+        status: UNREADABLE,
+        batches: [],
+        hasMoreBatches: false,
+      },
+      expect.objectContaining({
+        id: "gid://shopify/Product/2",
+        status: "Not set",
+      }),
+    ]);
   });
 
   it("leaves the status empty when a stored date isn't a calendar date", () => {

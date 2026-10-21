@@ -9,7 +9,9 @@ import {
   MAX_BATCHES,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
   type SaveProductFreshnessData,
+  type BatchNode,
   type UserErrorsPayload,
+  isReadableBatch,
   saveProductFreshnessVariables,
 } from "../shared/product-metafields";
 
@@ -50,11 +52,8 @@ interface ProductBatchesData {
   product: {
     freshnessBatches: {
       references: {
-        nodes: {
-          id?: string;
-          quantity?: { value: string } | null;
-          expirationDate?: { value: string } | null;
-        }[];
+        // null for a batch that no longer resolves
+        nodes: (BatchNode | null)[];
         pageInfo: { hasNextPage: boolean };
       } | null;
     } | null;
@@ -103,7 +102,7 @@ export async function readProductBatches(
   if (!product.freshnessBatches) return { notTracked: true };
   const { references } = product.freshnessBatches;
   // Writing back a list we couldn't fully read would unlink batches, so stop
-  if (!references || references.nodes.some((node) => !node.id)) {
+  if (!references || !references.nodes.every(isReadableBatch)) {
     throw new PermanentShopifyError(
       `Product ${productId} has a batch list the app can't read`,
     );
@@ -112,7 +111,7 @@ export async function readProductBatches(
 
   return {
     batches: references.nodes.map((node) => ({
-      id: node.id!,
+      id: node.id,
       quantity: Number(node.quantity?.value ?? 0),
       expirationDate: node.expirationDate?.value ?? "",
     })),
