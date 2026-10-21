@@ -1,7 +1,9 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useState } from "react";
 import { useLoaderData, useLocation, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
+import { BATCH_EDITOR_ID, BatchEditor, type EditTarget } from "../batch-editor";
 import { DashboardFilterBar, useDashboardFilters } from "../dashboard-filters";
 import { authenticate } from "../shopify.server";
 import {
@@ -56,9 +58,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let checkedProducts = 0;
   let hasMoreProducts = false;
   let after: string | null = null;
+  let today = "";
   for (let page = 0; page < pages; page += 1) {
     const data = await fetchProductPage(admin.graphql, query, after);
-    const today = getShopToday(data.shop.ianaTimezone, new Date());
+    today = getShopToday(data.shop.ianaTimezone, new Date());
     rows.push(
       ...filterRows(toDashboardRows(data.products.nodes, today), filters),
     );
@@ -73,6 +76,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     hasMoreProducts: hasMoreProducts || rows.length > PRODUCT_LIMIT,
     checkedProducts,
     filters,
+    today,
   };
 };
 
@@ -157,8 +161,9 @@ async function fetchProductPage(
 }
 
 export default function Dashboard() {
-  const { rows, hasMoreProducts, checkedProducts, filters } =
+  const { rows, hasMoreProducts, checkedProducts, filters, today } =
     useLoaderData<typeof loader>();
+  const [editing, setEditing] = useState<EditTarget | null>(null);
   const controls = useDashboardFilters(filters);
   const location = useLocation();
   const navigation = useNavigation();
@@ -200,6 +205,9 @@ export default function Dashboard() {
             <s-table-header>Stock</s-table-header>
             <s-table-header>In batches</s-table-header>
             <s-table-header>Batches</s-table-header>
+            <s-table-header>
+              <s-text accessibilityVisibility="exclusive">Actions</s-text>
+            </s-table-header>
           </s-table-header-row>
           <s-table-body>
             {rows.map((row) => (
@@ -285,6 +293,25 @@ export default function Dashboard() {
                     )}
                   </s-stack>
                 </s-table-cell>
+                <s-table-cell>
+                  {row.tracked && row.status !== UNREADABLE && (
+                    <s-button
+                      variant="tertiary"
+                      commandFor={BATCH_EDITOR_ID}
+                      command="--show"
+                      accessibilityLabel={`Edit batches for ${row.title}`}
+                      onClick={() =>
+                        setEditing({
+                          productId: row.id,
+                          title: row.title,
+                          openedAt: Date.now(),
+                        })
+                      }
+                    >
+                      Edit batches
+                    </s-button>
+                  )}
+                </s-table-cell>
               </s-table-row>
             ))}
           </s-table-body>
@@ -305,6 +332,7 @@ export default function Dashboard() {
           {limitNote(rows.length, checkedProducts, hasRowFilters(filters))}
         </s-paragraph>
       )}
+      <BatchEditor target={editing} today={today} />
       <PrivacyLink />
     </s-page>
   );

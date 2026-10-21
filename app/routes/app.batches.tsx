@@ -8,6 +8,9 @@ import {
 } from "../../shared/batch-edit";
 import { PRODUCT_GID } from "../../shared/product-gid";
 
+// The editor loads fresh batches each time it opens, so a save needn't reload them
+export const shouldRevalidate = () => false;
+
 // The dashboard's batch editor: GET ?productId= reads, POST saves
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);

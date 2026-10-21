@@ -2,9 +2,12 @@ import type { Batch } from "./freshness";
 import { PRODUCT_GID } from "./product-gid";
 import { type BatchErrors, hasErrors, validateBatch } from "./validation";
 
-export interface EditableBatch extends Batch {
+// Type literals rather than interfaces, so they can be sent as JSON
+export type EditableBatch = {
   id: string;
-}
+  quantity: number;
+  expirationDate: string;
+};
 
 export type BatchEditPlan =
   | { kind: "invalid"; errors: Record<string, BatchErrors> }
@@ -31,11 +34,11 @@ export class MismatchedEditsError extends Error {
   }
 }
 
-export interface BatchEditRequest {
+export type BatchEditRequest = {
   productId: string;
   opened: EditableBatch[];
   edited: EditableBatch[];
-}
+};
 
 /** The editor's request body, or null when it isn't shaped like one. */
 export function parseBatchEditRequest(body: unknown): BatchEditRequest | null {
