@@ -283,6 +283,22 @@ describe("runDueJobs", () => {
       "gid://shopify/Fulfillment/later",
     ]);
   });
+  it("bases a job's claim and retry on when it runs, not when the sweep began", async () => {
+    const shopify = setup();
+    shopify.failNext("GetProductBatches");
+    await saveFulfillmentJob({
+      ...key,
+      products: [{ productId, quantity: 1 }],
+      receivedAt: new Date("2020-01-15T09:00:00Z"),
+    });
+    const before = Date.now();
+
+    await runDueJobs(new Date("2020-01-15T12:00:00Z"));
+
+    const saved = await job();
+    expect(saved!.claimedAt!.getTime()).toBeGreaterThanOrEqual(before);
+    expect(saved!.nextRunAt.getTime()).toBeGreaterThanOrEqual(before + 30_000);
+  });
 });
 
 describe("startJobSweep", () => {

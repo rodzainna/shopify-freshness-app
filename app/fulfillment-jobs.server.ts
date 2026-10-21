@@ -155,7 +155,8 @@ export async function runDueJobs(now: Date = new Date()): Promise<number> {
     select: { shop: true, fulfillmentId: true },
     orderBy: { receivedAt: "asc" },
   });
-  for (const key of due) await runFulfillmentJob(key, now);
+  // Each run reads the clock itself, so a long sweep doesn't backdate later jobs
+  for (const key of due) await runFulfillmentJob(key);
   return due.length;
 }
 
