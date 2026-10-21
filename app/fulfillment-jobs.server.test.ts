@@ -1,0 +1,202 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { SessionNotFoundError } from "@shopify/shopify-app-react-router/server";
+import db from "./db.server";
+import {
+  STALE_RUN_MS,
+  runFulfillmentJob,
+  saveFulfillmentJob,
+} from "./fulfillment-jobs.server";
+import { unauthenticated } from "./shopify.server";
+import { fakeShopify } from "../test/fake-shopify";
+
+vi.mock("./shopify.server", () => ({
+  unauthenticated: { admin: vi.fn() },
+}));
+
+const shop = "fulfillment-jobs-test.myshopify.com";
+const fulfillmentId = "gid://shopify/Fulfillment/1";
+const key = { shop, fulfillmentId };
+const productId = "gid://shopify/Product/1";
+const BATCH = "gid://shopify/Metaobject/1";
+
+// 23:58 in the fake shop's timezone (UTC) on the day the batch expires
+const receivedAt = new Date("2026-10-21T23:58:00Z");
+const afterMidnight = new Date("2026-10-22T00:30:00Z");
+
+function setup() {
+  const shopify = fakeShopify();
+  shopify.addProduct(productId, {
+    [BATCH]: { quantity: 5, expirationDate: "2026-10-21" },
+  });
+  vi.mocked(unauthenticated.admin).mockResolvedValue({
+    admin: shopify.admin,
+  } as Awaited<ReturnType<typeof unauthenticated.admin>>);
+  return shopify;
+}
+
+const saveJob = () =>
+  saveFulfillmentJob({
+    ...key,
+    products: [{ productId, quantity: 2 }],
+    receivedAt,
+  });
+
+const job = () =>
+  db.fulfillmentJob.findUnique({ where: { shop_fulfillmentId: key } });
+
+async function clearTestData() {
+  const where = { shop };
+  await db.fulfillmentJob.deleteMany({ where });
+  await db.fulfillmentPlan.deleteMany({ where });
+  await db.fulfillmentDiscrepancy.deleteMany({ where });
+  await db.productLock.deleteMany({ where });
+}
+
+beforeEach(async () => {
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  await clearTestData();
+});
+afterEach(clearTestData);
+afterEach(() => vi.restoreAllMocks());
+
+describe("saveFulfillmentJob", () => {
+  it("saves a job due at once, and ignores a repeat delivery", async () => {
+    await saveJob();
+    await db.fulfillmentJob.update({
+      where: { shop_fulfillmentId: key },
+      data: { attempts: 3 },
+    });
+
+    await saveJob();
+
+    expect(await job()).toMatchObject({
+      status: "pending",
+      attempts: 3,
+      nextRunAt: receivedAt,
+      products: [{ productId, quantity: 2 }],
+    });
+  });
+});
+
+describe("runFulfillmentJob", () => {
+  it("applies a due job, then deletes it", async () => {
+    const shopify = setup();
+    await saveJob();
+
+    await runFulfillmentJob(key, afterMidnight);
+
+    expect(shopify.batch(BATCH)?.quantity).toBe(3);
+    expect(await job()).toBeNull();
+    expect(unauthenticated.admin).toHaveBeenCalledWith(shop);
+  });
+
+  it("plans against the day the job was received, not the day it runs", async () => {
+    const shopify = setup();
+    await saveJob();
+
+    await runFulfillmentJob(key, afterMidnight);
+
+    // Expired by the run's date, but fresh on the day it was received
+    expect(shopify.batch(BATCH)?.quantity).toBe(3);
+    expect(await db.fulfillmentDiscrepancy.count({ where: { shop } })).toBe(0);
+  });
+
+  it("leaves a job that isn't due yet", async () => {
+    const shopify = setup();
+    await saveJob();
+
+    await runFulfillmentJob(key, new Date(receivedAt.getTime() - 1));
+
+    expect(shopify.calls).toStrictEqual([]);
+    expect(await job()).toMatchObject({ status: "pending", attempts: 0 });
+  });
+
+  it("runs a job only once when two runs start together", async () => {
+    const shopify = setup();
+    await saveJob();
+
+    await Promise.all([
+      runFulfillmentJob(key, afterMidnight),
+      runFulfillmentJob(key, afterMidnight),
+    ]);
+
+    expect(
+      shopify.calls.filter((call) => call === "GetProductBatches"),
+    ).toHaveLength(1);
+    expect(shopify.batch(BATCH)?.quantity).toBe(3);
+  });
+
+  it("leaves a job another run holds, but reclaims one held too long", async () => {
+    const shopify = setup();
+    await saveJob();
+    const claimedAt = afterMidnight;
+    await db.fulfillmentJob.update({
+      where: { shop_fulfillmentId: key },
+      data: { status: "running", claimedAt, attempts: 1 },
+    });
+
+    await runFulfillmentJob(key, new Date(claimedAt.getTime() + 1_000));
+    expect(shopify.calls).toStrictEqual([]);
+
+    await runFulfillmentJob(key, new Date(claimedAt.getTime() + STALE_RUN_MS));
+    expect(shopify.batch(BATCH)?.quantity).toBe(3);
+    expect(await job()).toBeNull();
+  });
+
+  it("retries a temporary failure after a delay", async () => {
+    const shopify = setup();
+    shopify.failNext("GetProductBatches");
+    await saveJob();
+
+    await runFulfillmentJob(key, afterMidnight);
+
+    expect(await job()).toMatchObject({
+      status: "pending",
+      attempts: 1,
+      nextRunAt: new Date(afterMidnight.getTime() + 30_000),
+      lastError: "Simulated network failure in GetProductBatches",
+    });
+
+    await runFulfillmentJob(key, new Date(afterMidnight.getTime() + 30_000));
+    expect(shopify.batch(BATCH)?.quantity).toBe(3);
+    expect(await job()).toBeNull();
+  });
+
+  it("gives up after 8 retries and keeps the last error", async () => {
+    const shopify = setup();
+    shopify.failNext("GetProductBatches", 9);
+    await saveJob();
+
+    let now = afterMidnight;
+    for (let attempt = 1; attempt <= 9; attempt++) {
+      await runFulfillmentJob(key, now);
+      const saved = await job();
+      now = saved!.nextRunAt;
+    }
+
+    expect(await job()).toMatchObject({
+      status: "failed",
+      attempts: 9,
+      lastError: "Simulated network failure in GetProductBatches",
+    });
+    expect(shopify.batch(BATCH)?.quantity).toBe(5);
+  });
+
+  it("gives up at once when the shop has no session", async () => {
+    setup();
+    vi.mocked(unauthenticated.admin).mockRejectedValue(
+      new SessionNotFoundError("Could not find a session"),
+    );
+    await saveJob();
+
+    await runFulfillmentJob(key, afterMidnight);
+
+    expect(await job()).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      lastError: "Could not find a session",
+    });
+  });
+});
