@@ -54,3 +54,19 @@ export function formatInventoryMismatch({
   const verb = inStock === 1 ? "is" : "are";
   return `Batches total ${batchTotal}, but only ${inStock} ${verb} in stock.`;
 }
+
+// Stock no batch accounts for yet; null when untracked or every unit is in a batch
+export function getUnbatchedStock(
+  batchTotal: number,
+  inventory: ProductInventory,
+): number | null {
+  if (!inventory.tracksInventory) return null;
+  const unbatched = inventory.totalInventory - batchTotal;
+  return unbatched > 0 ? unbatched : null;
+}
+
+export function formatUnbatchedStock(units: number): string {
+  return units === 1
+    ? "1 unit in stock isn't in a batch yet."
+    : `${units} units in stock aren't in a batch yet.`;
+}

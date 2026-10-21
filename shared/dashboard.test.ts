@@ -81,6 +81,7 @@ describe("toDashboardRows", () => {
       batchTotal: 13,
       uncountedBatches: 0,
       overStock: null,
+      unbatchedStock: null,
     });
   });
 
@@ -100,6 +101,7 @@ describe("toDashboardRows", () => {
         batchTotal: 0,
         uncountedBatches: 0,
         overStock: null,
+        unbatchedStock: null,
       },
     ]);
   });
@@ -161,6 +163,7 @@ describe("toDashboardRows", () => {
         batchTotal: null,
         uncountedBatches: 0,
         overStock: null,
+        unbatchedStock: null,
       },
       expect.objectContaining({
         id: "gid://shopify/Product/2",
@@ -389,6 +392,38 @@ describe("toDashboardRows", () => {
       );
 
       expect(row).toMatchObject({ hasMoreBatches: true, overStock: null });
+    });
+
+    it("counts tracked stock that isn't in a batch", () => {
+      const [row] = toDashboardRows(
+        [milk({ tracksInventory: true, totalInventory: 32 })],
+        TODAY,
+      );
+
+      expect(row).toMatchObject({ overStock: null, unbatchedStock: 2 });
+    });
+
+    it.each([
+      [
+        "every unit is in a batch",
+        milk({ tracksInventory: true, totalInventory: 30 }),
+      ],
+      [
+        "inventory isn't tracked",
+        milk({ tracksInventory: false, totalInventory: 50 }),
+      ],
+      [
+        "some batches didn't load",
+        milk({ tracksInventory: true, totalInventory: 50 }, true),
+      ],
+      [
+        "the product has no batches",
+        product({ tracksInventory: true, totalInventory: 50 }),
+      ],
+    ])("doesn't count unbatched stock when %s", (_case, node) => {
+      const [row] = toDashboardRows([node], TODAY);
+
+      expect(row.unbatchedStock).toBeNull();
     });
 
     it("counts batches with an invalid quantity separately", () => {

@@ -164,7 +164,12 @@ export default function Dashboard() {
                     {row.overStock !== null && (
                       <s-badge tone="warning">
                         {row.overStock}
-                        {row.hasMoreBatches && "+"} over stock
+                        {row.hasMoreBatches && "+"} over
+                      </s-badge>
+                    )}
+                    {row.unbatchedStock !== null && (
+                      <s-badge tone="info">
+                        {row.unbatchedStock} unbatched
                       </s-badge>
                     )}
                   </s-stack>

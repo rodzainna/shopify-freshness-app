@@ -8,6 +8,7 @@ import {
 import {
   type ProductInventory,
   exceedsStock,
+  getUnbatchedStock,
   totalBatchQuantity,
 } from "./inventory";
 import { type BatchNode, isReadableBatch } from "./product-metafields";
@@ -70,6 +71,8 @@ export interface DashboardRow {
   uncountedBatches: number;
   // Units over the stock shown, when exceedsStock; a lower bound if some didn't load
   overStock: number | null;
+  // Stock not in any batch; only for products with batches, and all of them loaded
+  unbatchedStock: number | null;
 }
 
 export function toDashboardRows(
@@ -97,6 +100,7 @@ export function toDashboardRows(
         batchTotal: null,
         uncountedBatches: 0,
         overStock: null,
+        unbatchedStock: null,
       };
     }
 
@@ -114,18 +118,23 @@ export function toDashboardRows(
 
     // Loaded batches are a lower bound, so a total already over stock is certain
     const batchTotal = totalBatchQuantity(batches);
+    const hasMoreBatches = references?.pageInfo.hasNextPage ?? false;
     return {
       ...row,
       status: computeAggregateFreshness(batches, today),
       batches: batches.slice(0, SHOWN_BATCHES),
       hiddenBatches: Math.max(0, batches.length - SHOWN_BATCHES),
-      hasMoreBatches: references?.pageInfo.hasNextPage ?? false,
+      hasMoreBatches,
       batchTotal,
       uncountedBatches: batches.filter((batch) => validateBatch(batch).quantity)
         .length,
       overStock: exceedsStock(batchTotal, product)
         ? batchTotal - product.totalInventory
         : null,
+      unbatchedStock:
+        batches.length > 0 && !hasMoreBatches
+          ? getUnbatchedStock(batchTotal, product)
+          : null,
     };
   });
 }

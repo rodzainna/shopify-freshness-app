@@ -3,7 +3,9 @@ import { describe, it, expect } from "vitest";
 import {
   exceedsStock,
   formatInventoryMismatch,
+  formatUnbatchedStock,
   getInventoryMismatch,
+  getUnbatchedStock,
 } from "./inventory";
 import { MAX_QUANTITY } from "./validation";
 
@@ -103,5 +105,31 @@ describe("formatInventoryMismatch", () => {
     [{ batchTotal: 5, inStock: 0 }, "Batches total 5, but none are in stock."],
   ])("describes %o", (mismatch, message) => {
     expect(formatInventoryMismatch(mismatch)).toBe(message);
+  });
+});
+
+describe("getUnbatchedStock", () => {
+  const tracked = (totalInventory: number) => ({
+    tracksInventory: true,
+    totalInventory,
+  });
+
+  it.each([
+    [8, tracked(10), 2],
+    [10, tracked(10), null],
+    [12, tracked(10), null],
+    [0, tracked(-5), null],
+    [8, { tracksInventory: false, totalInventory: 10 }, null],
+  ])("%i in batches against %o is %s", (batchTotal, inventory, expected) => {
+    expect(getUnbatchedStock(batchTotal, inventory)).toBe(expected);
+  });
+});
+
+describe("formatUnbatchedStock", () => {
+  it.each([
+    [1, "1 unit in stock isn't in a batch yet."],
+    [2, "2 units in stock aren't in a batch yet."],
+  ])("describes %i", (units, message) => {
+    expect(formatUnbatchedStock(units)).toBe(message);
   });
 });
