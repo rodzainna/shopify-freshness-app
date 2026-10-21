@@ -46,15 +46,18 @@ export async function readShopToday(
   return getShopToday(data.shop.ianaTimezone, now);
 }
 
+interface BatchNode {
+  id?: string;
+  quantity?: { value: string } | null;
+  expirationDate?: { value: string } | null;
+}
+
 interface ProductBatchesData {
   product: {
     freshnessBatches: {
       references: {
-        nodes: {
-          id?: string;
-          quantity?: { value: string } | null;
-          expirationDate?: { value: string } | null;
-        }[];
+        // null for a batch that no longer resolves
+        nodes: (BatchNode | null)[];
         pageInfo: { hasNextPage: boolean };
       } | null;
     } | null;
@@ -66,6 +69,12 @@ export type ProductBatches =
   | { batches: StoredBatch[] }
   | { notTracked: true }
   | { problem: "product_not_found" | "too_many_batches" };
+
+function isReadable(
+  node: BatchNode | null,
+): node is BatchNode & { id: string } {
+  return Boolean(node?.id);
+}
 
 export async function readProductBatches(
   admin: AdminApiContext,
@@ -103,7 +112,7 @@ export async function readProductBatches(
   if (!product.freshnessBatches) return { notTracked: true };
   const { references } = product.freshnessBatches;
   // Writing back a list we couldn't fully read would unlink batches, so stop
-  if (!references || references.nodes.some((node) => !node.id)) {
+  if (!references || !references.nodes.every(isReadable)) {
     throw new PermanentShopifyError(
       `Product ${productId} has a batch list the app can't read`,
     );
@@ -112,7 +121,7 @@ export async function readProductBatches(
 
   return {
     batches: references.nodes.map((node) => ({
-      id: node.id!,
+      id: node.id,
       quantity: Number(node.quantity?.value ?? 0),
       expirationDate: node.expirationDate?.value ?? "",
     })),
