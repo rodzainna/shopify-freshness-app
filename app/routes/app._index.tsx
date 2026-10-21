@@ -1,8 +1,8 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useNavigation, useSearchParams } from "react-router";
+import { useLoaderData, useLocation, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
-import { DashboardFilterBar } from "../dashboard-filters";
+import { DashboardFilterBar, useDashboardFilters } from "../dashboard-filters";
 import { authenticate } from "../shopify.server";
 import {
   type DashboardProductNode,
@@ -18,7 +18,6 @@ import {
   isInStock,
 } from "../../shared/freshness";
 import {
-  FILTER_PARAMS,
   hasActiveFilters,
   parseDashboardFilters,
   toProductQuery,
@@ -29,13 +28,8 @@ import { MAX_BATCHES } from "../../shared/product-metafields";
 // complete unless a product has more; at 250 the query requests 269 of 1,000 points.
 const PRODUCT_LIMIT = 50;
 
-// Choices for the Type and Vendor filters, from the whole store
-const OPTION_LIMIT = 250;
-
 interface DashboardData {
   shop: { ianaTimezone: string };
-  productTypes: { nodes: string[] };
-  productVendors: { nodes: string[] };
   products: {
     nodes: DashboardProductNode[];
     pageInfo: { hasNextPage: boolean };
@@ -51,17 +45,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       query FreshnessDashboard(
         $productLimit: Int!
         $batchLimit: Int!
-        $optionLimit: Int!
         $query: String
       ) {
         shop {
           ianaTimezone
-        }
-        productTypes(first: $optionLimit) {
-          nodes
-        }
-        productVendors(first: $optionLimit) {
-          nodes
         }
         products(first: $productLimit, sortKey: TITLE, query: $query) {
           nodes {
@@ -109,7 +96,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       variables: {
         productLimit: PRODUCT_LIMIT,
         batchLimit: MAX_BATCHES,
-        optionLimit: OPTION_LIMIT,
         query: toProductQuery(filters),
       },
     },
@@ -123,24 +109,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     rows: toDashboardRows(data.products.nodes, today),
     hasMoreProducts: data.products.pageInfo.hasNextPage,
     filters,
-    types: data.productTypes.nodes,
-    vendors: data.productVendors.nodes,
   };
 };
 
 export default function Dashboard() {
-  const { rows, hasMoreProducts, filters, types, vendors } =
-    useLoaderData<typeof loader>();
-  const [, setSearchParams] = useSearchParams();
-  const loading = useNavigation().state === "loading";
+  const { rows, hasMoreProducts, filters } = useLoaderData<typeof loader>();
+  const controls = useDashboardFilters(filters);
+  const location = useLocation();
+  const navigation = useNavigation();
+  // Only this page's own reloads, not leaving it for another route
+  const loading =
+    navigation.state === "loading" &&
+    navigation.location.pathname === location.pathname;
   const filtered = hasActiveFilters(filters);
-
-  function clearFilters() {
-    setSearchParams((params) => {
-      for (const name of Object.values(FILTER_PARAMS)) params.delete(name);
-      return params;
-    });
-  }
 
   if (rows.length === 0 && !filtered) {
     return (
@@ -166,11 +147,7 @@ export default function Dashboard() {
     <s-page heading="Freshness overview" inlineSize="large">
       <s-section padding="none">
         <s-table loading={loading || undefined}>
-          <DashboardFilterBar
-            filters={filters}
-            types={types}
-            vendors={vendors}
-          />
+          <DashboardFilterBar filters={filters} controls={controls} />
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
             <s-table-header listSlot="secondary">Status</s-table-header>
@@ -271,7 +248,7 @@ export default function Dashboard() {
           <s-box padding="base">
             <s-stack gap="small-200" alignItems="center">
               <s-text>No products match.</s-text>
-              <s-button variant="tertiary" onClick={clearFilters}>
+              <s-button variant="tertiary" onClick={controls.clearAll}>
                 Clear filters
               </s-button>
             </s-stack>

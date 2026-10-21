@@ -26,11 +26,7 @@ export function parseDashboardFilters(
 }
 
 export function hasActiveFilters(filters: DashboardFilters): boolean {
-  return (
-    filters.search !== "" ||
-    filters.types.length > 0 ||
-    filters.vendors.length > 0
-  );
+  return toProductQuery(filters) !== null;
 }
 
 /**
