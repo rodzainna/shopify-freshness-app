@@ -17,6 +17,7 @@ type Variables = Record<string, unknown>;
  * An in-memory store answering the app's fulfillment GraphQL operations, so
  * tests can check what Shopify ends up holding after failures and retries.
  * `delayMs` makes every call take that long, so concurrent work overlaps.
+ * It uses real timers, so it hangs under vi.useFakeTimers().
  */
 export function fakeShopify({ delayMs = 0 } = {}) {
   const products = new Map<string, FakeProduct>();
