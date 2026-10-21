@@ -4,7 +4,7 @@ import {
   PermanentShopifyError,
   type ProductBatches,
   readProductBatches,
-  saveProductFreshness,
+  saveEarliestExpirationDate,
   writeBatchValues,
 } from "./fulfillment-shopify.server";
 import { ProductLockBusyError, withProductLock } from "./product-lock.server";
@@ -12,6 +12,7 @@ import {
   type EditableBatch,
   applyEdits,
   planBatchEdit,
+  sameValues,
 } from "../shared/batch-edit";
 import { getEarliestExpirationDate } from "../shared/freshness";
 import type { BatchErrors } from "../shared/validation";
@@ -35,10 +36,13 @@ export type BatchEditResult =
 export async function loadBatches(
   admin: AdminApiContext,
   productId: string,
-): Promise<{ batches: EditableBatch[] } | { message: string }> {
+): Promise<
+  | { batches: EditableBatch[]; earliestExpirationDate: string | null }
+  | { message: string }
+> {
   try {
     const read = await readProductBatches(admin, productId);
-    if ("batches" in read) return { batches: read.batches };
+    if ("batches" in read) return read;
     return { message: unavailableMessage(read) };
   } catch (error) {
     if (error instanceof PermanentShopifyError) {
@@ -74,51 +78,43 @@ export async function editBatches({
     return await withProductLock(
       shop,
       productId,
-      async () => {
+      async (): Promise<BatchEditResult> => {
         const loaded = await loadBatches(admin, productId);
         if ("message" in loaded) return { kind: "unavailable", ...loaded };
         const current = loaded.batches;
 
         const plan = planBatchEdit(opened, current, edited);
-        if (plan.kind === "changed")
+        if (plan.kind === "changed") {
           return { kind: "changed", batches: current };
-        if (plan.kind === "unchanged") {
-          return { kind: "unchanged", batches: current };
         }
         if (plan.kind === "invalid") return plan;
 
-        const failures = await writeBatchValues(admin, plan.updates);
-        for (const { batch, error } of failures) {
-          console.error(
-            `Saving batch ${batch.id} on ${productId} failed`,
-            error,
-          );
-        }
-        const failed = new Set(failures.map(({ batch }) => batch.id));
-        const after = applyEdits(
-          current,
-          plan.updates.filter(({ id }) => !failed.has(id)),
-        );
+        const updates = plan.kind === "write" ? plan.updates : [];
+        const after = await writeEdits(admin, productId, current, updates);
+        const failed = updates
+          .filter((update) => {
+            const saved = after.find(({ id }) => id === update.id);
+            return !saved || !sameValues(update, saved);
+          })
+          .map(({ id }) => id);
 
-        // The list itself is unchanged; this updates the earliest date
+        // Also repairs a date an earlier save couldn't write
+        const earliest = getEarliestExpirationDate(after);
+        const dateStale = earliest !== loaded.earliestExpirationDate;
         let dateFailed = false;
-        try {
-          await saveProductFreshness(
-            admin,
-            productId,
-            current.map(({ id }) => id),
-            getEarliestExpirationDate(after),
-          );
-        } catch (error) {
-          console.error(`Saving ${productId}'s earliest date failed`, error);
-          dateFailed = true;
+        if (dateStale) {
+          try {
+            await saveEarliestExpirationDate(admin, productId, earliest);
+          } catch (error) {
+            console.error(`Saving ${productId}'s earliest date failed`, error);
+            dateFailed = true;
+          }
         }
-        return {
-          kind: "saved",
-          batches: after,
-          failed: [...failed],
-          dateFailed,
-        };
+
+        if (updates.length === 0 && !dateStale) {
+          return { kind: "unchanged", batches: current };
+        }
+        return { kind: "saved", batches: after, failed, dateFailed };
       },
       { waitMs: lockWaitMs },
     );
@@ -131,6 +127,30 @@ export async function editBatches({
     }
     throw error;
   }
+}
+
+// The batches as Shopify holds them after the writes
+async function writeEdits(
+  admin: AdminApiContext,
+  productId: string,
+  current: EditableBatch[],
+  updates: EditableBatch[],
+): Promise<EditableBatch[]> {
+  if (updates.length === 0) return current;
+  const failures = await writeBatchValues(admin, updates);
+  if (failures.length === 0) return applyEdits(current, updates);
+
+  for (const { batch, error } of failures) {
+    console.error(`Saving batch ${batch.id} on ${productId} failed`, error);
+  }
+  // A write that timed out may still have landed, so read what Shopify holds
+  const reread = await loadBatches(admin, productId).catch(() => null);
+  if (reread && "batches" in reread) return reread.batches;
+  const failed = new Set(failures.map(({ batch }) => batch.id));
+  return applyEdits(
+    current,
+    updates.filter(({ id }) => !failed.has(id)),
+  );
 }
 
 function unavailableMessage(

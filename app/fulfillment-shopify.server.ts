@@ -9,6 +9,7 @@ import {
   MAX_BATCHES,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
   type SaveProductFreshnessData,
+  saveEarliestDateVariables,
   type BatchNode,
   type UserErrorsPayload,
   isReadableBatch,
@@ -50,6 +51,7 @@ export async function readShopToday(
 
 interface ProductBatchesData {
   product: {
+    earliestExpiration: { value: string } | null;
     freshnessBatches: {
       references: {
         // null for a batch that no longer resolves
@@ -62,7 +64,7 @@ interface ProductBatchesData {
 
 // notTracked: the product has no batch list, so the app has nothing to update
 export type ProductBatches =
-  | { batches: StoredBatch[] }
+  | { batches: StoredBatch[]; earliestExpirationDate: string | null }
   | { notTracked: true }
   | { problem: "product_not_found" | "too_many_batches" };
 
@@ -75,6 +77,9 @@ export async function readProductBatches(
     `#graphql
       query GetProductBatches($productId: ID!, $maxBatches: Int!) {
         product(id: $productId) {
+          earliestExpiration: metafield(key: "earliest_expiration_date") {
+            value
+          }
           freshnessBatches: metafield(key: "freshness_batches") {
             references(first: $maxBatches) {
               nodes {
@@ -115,6 +120,7 @@ export async function readProductBatches(
       quantity: Number(node.quantity?.value ?? 0),
       expirationDate: node.expirationDate?.value ?? "",
     })),
+    earliestExpirationDate: product.earliestExpiration?.value ?? null,
   };
 }
 
@@ -157,6 +163,24 @@ export async function saveProductFreshness(
     `Saving product ${productId} freshness`,
     freshness.metafieldsSet?.userErrors,
     freshness.metafieldsDelete?.userErrors,
+  );
+}
+
+/** Writes only the product's earliest date, deleting it when null. */
+export async function saveEarliestExpirationDate(
+  admin: AdminApiContext,
+  productId: string,
+  earliestExpirationDate: string | null,
+): Promise<void> {
+  const data = await query<SaveProductFreshnessData>(
+    admin,
+    SAVE_PRODUCT_FRESHNESS_MUTATION,
+    saveEarliestDateVariables(productId, earliestExpirationDate),
+  );
+  throwOnUserErrors(
+    `Saving product ${productId} earliest date`,
+    data.metafieldsSet?.userErrors,
+    data.metafieldsDelete?.userErrors,
   );
 }
 
@@ -219,46 +243,38 @@ async function writeEach<T>(
   }
 }
 
-async function setBatchQuantity(
+function setBatchQuantity(
   admin: AdminApiContext,
   id: string,
   quantity: number,
 ): Promise<void> {
-  const data = await query<{
-    metaobjectUpdate: UserErrorsPayload | null;
-  }>(
-    admin,
-    `#graphql
-      mutation SetBatchQuantity($id: ID!, $quantity: String!) {
-        metaobjectUpdate(
-          id: $id
-          metaobject: { fields: [{ key: "quantity", value: $quantity }] }
-        ) {
-          userErrors {
-            field
-            message
-            code
-          }
-        }
-      }`,
-    { id, quantity: String(quantity) },
-  );
-  throwOnUserErrors(
-    `Setting batch ${id} quantity`,
-    data.metaobjectUpdate?.userErrors,
-  );
+  return setBatchFields(admin, id, `Setting batch ${id} quantity`, [
+    { key: "quantity", value: String(quantity) },
+  ]);
 }
 
-async function setBatchValues(
+function setBatchValues(
   admin: AdminApiContext,
   { id, quantity, expirationDate }: StoredBatch,
+): Promise<void> {
+  return setBatchFields(admin, id, `Saving batch ${id}`, [
+    { key: "quantity", value: String(quantity) },
+    { key: "expiration_date", value: expirationDate },
+  ]);
+}
+
+async function setBatchFields(
+  admin: AdminApiContext,
+  id: string,
+  action: string,
+  fields: { key: "quantity" | "expiration_date"; value: string }[],
 ): Promise<void> {
   const data = await query<{
     metaobjectUpdate: UserErrorsPayload | null;
   }>(
     admin,
     `#graphql
-      mutation SetBatchValues($id: ID!, $metaobject: MetaobjectUpdateInput!) {
+      mutation SetBatchFields($id: ID!, $metaobject: MetaobjectUpdateInput!) {
         metaobjectUpdate(id: $id, metaobject: $metaobject) {
           userErrors {
             field
@@ -267,17 +283,9 @@ async function setBatchValues(
           }
         }
       }`,
-    {
-      id,
-      metaobject: {
-        fields: [
-          { key: "quantity", value: String(quantity) },
-          { key: "expiration_date", value: expirationDate },
-        ],
-      },
-    },
+    { id, metaobject: { fields } },
   );
-  throwOnUserErrors(`Saving batch ${id}`, data.metaobjectUpdate?.userErrors);
+  throwOnUserErrors(action, data.metaobjectUpdate?.userErrors);
 }
 
 async function deleteBatch(admin: AdminApiContext, id: string): Promise<void> {

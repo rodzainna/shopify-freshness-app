@@ -1,4 +1,8 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import type {
+  HeadersFunction,
+  LoaderFunctionArgs,
+  ShouldRevalidateFunction,
+} from "react-router";
 import { useState } from "react";
 import { useLoaderData, useLocation, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -370,6 +374,18 @@ function PrivacyLink() {
     </s-paragraph>
   );
 }
+
+// After a batch editor save, reload only if the batches are now different
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  formAction,
+  actionResult,
+  defaultShouldRevalidate,
+}) => {
+  if (formAction === "/app/batches") {
+    return actionResult?.kind === "saved" || actionResult?.kind === "changed";
+  }
+  return defaultShouldRevalidate;
+};
 
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);

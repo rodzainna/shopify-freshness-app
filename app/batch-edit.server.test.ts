@@ -19,6 +19,8 @@ function setup() {
     [SOON]: { quantity: 6, expirationDate: "2026-10-23" },
     [LATER]: { quantity: 12, expirationDate: "2026-10-28" },
   });
+  // As the panel would have stored it
+  shopify.product(productId)!.earliestExpirationDate = "2026-10-23";
   const edit = (edited: typeof opened, lockWaitMs?: number) =>
     editBatches({
       admin: shopify.admin,
@@ -70,9 +72,61 @@ describe("editBatches", () => {
       earliestExpirationDate: "2026-10-28",
     });
     expect(writes(shopify.calls)).toStrictEqual([
-      "SetBatchValues",
+      "SetBatchFields",
       "SaveProductFreshness",
     ]);
+  });
+
+  it("doesn't rewrite an earliest date that's still right", async () => {
+    const { shopify, edit } = setup();
+
+    await edit([{ ...opened[0], quantity: 2 }, opened[1]]);
+
+    expect(writes(shopify.calls)).toStrictEqual(["SetBatchFields"]);
+  });
+
+  it("repairs a stale earliest date even when nothing was edited", async () => {
+    const { shopify, edit } = setup();
+    shopify.product(productId)!.earliestExpirationDate = null;
+
+    expect(await edit(opened)).toMatchObject({ kind: "saved", failed: [] });
+    expect(writes(shopify.calls)).toStrictEqual(["SaveProductFreshness"]);
+    expect(shopify.product(productId)?.earliestExpirationDate).toBe(
+      "2026-10-23",
+    );
+  });
+
+  it("leaves a batch the panel adds during the save linked", async () => {
+    const { shopify, edit } = setup();
+    const ADDED = "gid://shopify/Metaobject/added";
+    // The panel doesn't take the app's lock, so it can add a batch mid-save
+    const graphql = shopify.admin.graphql;
+    shopify.admin.graphql = ((query: string, options?: object) => {
+      if (query.includes("SetBatchFields")) {
+        shopify.product(productId)!.batchIds!.push(ADDED);
+      }
+      return graphql(query, options);
+    }) as typeof graphql;
+
+    await edit([{ ...opened[0], expirationDate: "2026-11-30" }, opened[1]]);
+
+    expect(shopify.product(productId)).toEqual({
+      batchIds: [SOON, LATER, ADDED],
+      earliestExpirationDate: "2026-10-28",
+    });
+  });
+
+  it("counts a write whose response was lost as saved when it landed", async () => {
+    const { shopify, edit } = setup();
+    shopify.loseResponseNext("SetBatchFields");
+
+    const result = await edit([{ ...opened[0], quantity: 4 }, opened[1]]);
+
+    expect(result).toMatchObject({
+      kind: "saved",
+      failed: [],
+      batches: [{ ...opened[0], quantity: 4 }, opened[1]],
+    });
   });
 
   it("writes nothing when nothing was edited", async () => {
@@ -122,7 +176,7 @@ describe("editBatches", () => {
 
   it("reports a batch Shopify rejects and keeps its current value", async () => {
     const { shopify, edit } = setup();
-    shopify.rejectNext("SetBatchValues");
+    shopify.rejectNext("SetBatchFields");
 
     const result = await edit([
       { id: SOON, quantity: 4, expirationDate: "2026-11-30" },
@@ -147,8 +201,9 @@ describe("editBatches", () => {
     const { shopify, edit } = setup();
     shopify.rejectNext("SaveProductFreshness");
 
+    // Moving the soonest date changes the earliest date, so it needs writing
     const result = await edit([
-      { id: SOON, quantity: 4, expirationDate: "2026-10-23" },
+      { id: SOON, quantity: 4, expirationDate: "2026-11-30" },
       opened[1],
     ]);
 
@@ -201,6 +256,7 @@ describe("loadBatches", () => {
 
     expect(await loadBatches(shopify.admin, productId)).toStrictEqual({
       batches: opened,
+      earliestExpirationDate: "2026-10-23",
     });
   });
 

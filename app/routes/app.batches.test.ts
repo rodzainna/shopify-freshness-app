@@ -68,12 +68,29 @@ describe("app/batches", () => {
     expect(await response.json()).toStrictEqual({ message });
   });
 
+  it("turns a Shopify failure into a message for the editor", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const shopify = setup();
+    shopify.failNext("GetProductBatches");
+
+    const response = (await post({
+      productId,
+      opened,
+      edited: opened,
+    })) as Response;
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toStrictEqual({
+      message: "Couldn't reach Shopify. Try again.",
+    });
+  });
+
   it("reads a product's batches", async () => {
     setup();
 
     expect(
       await get(`productId=${encodeURIComponent(productId)}`),
-    ).toStrictEqual({ batches: opened });
+    ).toStrictEqual({ batches: opened, earliestExpirationDate: null });
   });
 
   it("refuses a product id that isn't a GID", async () => {

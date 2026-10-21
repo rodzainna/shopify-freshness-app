@@ -18,7 +18,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!PRODUCT_GID.test(productId)) {
     return Response.json({ message: "Unknown product." }, { status: 400 });
   }
-  return loadBatches(admin, productId);
+  return withErrorMessage(() => loadBatches(admin, productId));
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -27,13 +27,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!body) {
     return Response.json({ message: "Invalid request." }, { status: 400 });
   }
+  return withErrorMessage(() =>
+    editBatches({ admin, shop: session.shop, ...body }),
+  );
+};
 
+// Shows the error in the editor instead of replacing the whole dashboard
+async function withErrorMessage<T>(work: () => Promise<T>) {
   try {
-    return await editBatches({ admin, shop: session.shop, ...body });
+    return await work();
   } catch (error) {
+    if (error instanceof Response) throw error;
     if (error instanceof MismatchedEditsError) {
       return Response.json({ message: error.message }, { status: 400 });
     }
-    throw error;
+    console.error("Batch editor request failed", error);
+    return Response.json(
+      { message: "Couldn't reach Shopify. Try again." },
+      { status: 502 },
+    );
   }
-};
+}

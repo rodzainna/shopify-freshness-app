@@ -68,6 +68,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/** Errors by batch id; empty when every batch is valid. */
+export function validateEdits(
+  batches: EditableBatch[],
+): Record<string, BatchErrors> {
+  const errors: Record<string, BatchErrors> = {};
+  for (const batch of batches) {
+    const batchErrors = validateEdit(batch);
+    if (hasErrors(batchErrors)) errors[batch.id] = batchErrors;
+  }
+  return errors;
+}
+
 /**
  * Decides what a dashboard save writes. `opened` is what the editor showed,
  * `current` is read again under the product's lock, `edited` is the form.
@@ -83,11 +95,7 @@ export function planBatchEdit(
     throw new MismatchedEditsError();
   }
 
-  const errors: Record<string, BatchErrors> = {};
-  for (const batch of edited) {
-    const batchErrors = validateEdit(batch);
-    if (hasErrors(batchErrors)) errors[batch.id] = batchErrors;
-  }
+  const errors = validateEdits(edited);
   if (Object.keys(errors).length > 0) return { kind: "invalid", errors };
 
   if (!sameBatches(opened, current)) return { kind: "changed" };
@@ -133,6 +141,6 @@ function sameBatches(a: EditableBatch[], b: EditableBatch[]): boolean {
   );
 }
 
-function sameValues(a: Batch, b: Batch): boolean {
+export function sameValues(a: Batch, b: Batch): boolean {
   return a.quantity === b.quantity && a.expirationDate === b.expirationDate;
 }

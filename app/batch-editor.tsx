@@ -1,20 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { useFetcher, useRevalidator } from "react-router";
+import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
 import type { BatchEditResult } from "./batch-edit.server";
-import { type EditableBatch, validateEdit } from "../shared/batch-edit";
+import { type EditableBatch, validateEdits } from "../shared/batch-edit";
 import {
   FRESHNESS_TONE,
   computeBatchFreshness,
   formatDaysRemaining,
   isCalendarDate,
 } from "../shared/freshness";
-import {
-  MAX_QUANTITY,
-  type BatchErrors,
-  hasErrors,
-} from "../shared/validation";
+import { MAX_QUANTITY, type BatchErrors } from "../shared/validation";
 
 export const BATCH_EDITOR_ID = "batch-editor";
 
@@ -40,7 +36,6 @@ export function BatchEditor({
   today: string;
 }) {
   const shopify = useAppBridge();
-  const revalidator = useRevalidator();
   const modal = useRef<HTMLElementTagNameMap["s-modal"]>(null);
   const load = useFetcher<Loaded>();
   const save = useFetcher<BatchEditResult | { message: string }>();
@@ -66,6 +61,8 @@ export function BatchEditor({
     loaded?: unknown;
     saved?: unknown;
   }>({});
+  // The product the last save was for, so its result can't land on another
+  const savedFor = useRef<{ productId: string; edited: EditableBatch[] }>();
 
   useEffect(() => {
     if (!target || handled.current.target === target) return;
@@ -91,6 +88,8 @@ export function BatchEditor({
       return;
     }
     handled.current.saved = result;
+    const sent = savedFor.current;
+    if (!sent || sent.productId !== target?.productId) return;
     if (!("kind" in result)) {
       setNotice({ tone: "critical", message: result.message });
       return;
@@ -114,18 +113,25 @@ export function BatchEditor({
         modal.current?.hideOverlay();
         return;
       case "saved": {
-        revalidator.revalidate();
         const problems = saveProblems(result.failed.length, result.dateFailed);
         if (!problems) {
           shopify.toast.show("Batches saved");
           modal.current?.hideOverlay();
           return;
         }
+        // Start from what Shopify holds, keeping the edits that didn't save
         reset(result.batches);
+        setEdited(
+          result.batches.map((batch) =>
+            result.failed.includes(batch.id)
+              ? (sent.edited.find(({ id }) => id === batch.id) ?? batch)
+              : batch,
+          ),
+        );
         setNotice({ tone: "warning", message: problems });
       }
     }
-  }, [save.state, save.data, revalidator, shopify]);
+  }, [save.state, save.data, shopify, target]);
 
   function update(id: string, change: Partial<EditableBatch>) {
     setEdited((batches) =>
@@ -137,14 +143,11 @@ export function BatchEditor({
 
   function submit() {
     if (!target) return;
-    const found: Record<string, BatchErrors> = {};
-    for (const batch of edited) {
-      const batchErrors = validateEdit(batch);
-      if (hasErrors(batchErrors)) found[batch.id] = batchErrors;
-    }
+    const found = validateEdits(edited);
     setErrors(found);
     setNotice(null);
     if (Object.keys(found).length > 0) return;
+    savedFor.current = { productId: target.productId, edited };
     save.submit(
       { productId: target.productId, opened, edited },
       { method: "post", action: "/app/batches", encType: "application/json" },
@@ -233,6 +236,7 @@ export function BatchEditor({
         slot="secondary-actions"
         commandFor={BATCH_EDITOR_ID}
         command="--hide"
+        disabled={saving || undefined}
       >
         Cancel
       </s-button>
