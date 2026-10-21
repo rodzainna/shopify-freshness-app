@@ -40,6 +40,8 @@ Product page panel ──writes──▶ freshness_batch metaobjects (quantity, 
 Dashboard ──reads──▶ the same metaobjects and metafields through the Admin GraphQL API
 
 fulfillments/create webhook ─▶ verify HMAC ─▶ skip duplicates ─▶ group line items by product
+                            ─▶ save a job ─▶ reply 200
+fulfillment job (started at once, or by a 30s sweep)
                             ─▶ per-product lock ─▶ FEFO plan ─▶ save plan (and any shortfall) ─▶ write batches
 ```
 
@@ -58,7 +60,8 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 - **Plain calendar dates.** Batches store `YYYY-MM-DD`. Days remaining is simple date subtraction in the shop's timezone, the way FEFO and inventory systems count it.
 - **Expired stock is never decremented.** FEFO skips expired batches, because packing teams shouldn't ship them. Anything that fresh stock can't cover is reported as a shortfall, never driven negative.
 - **A per-product lock** (Prisma, SQLite) serializes batch updates. Batches live in Shopify, not in the app's database, so a transaction can't protect them. The lock expires after 30 seconds, so a crashed holder frees it, and release only deletes the caller's own lock.
-- **Save the plan, then write.** Shopify has no transaction across several metaobject writes, so each fulfillment's plan (target quantities, not deltas) is saved first. A retried webhook finishes a half-applied plan instead of decrementing twice. If a merchant edited the batches in between, the plan is dropped and recorded as a discrepancy.
+- **Reply first, apply after.** Shopify allows 5 seconds for a webhook, and applying a fulfillment takes about 2 seconds per product. The webhook saves a job and replies at once. The job runs straight away, or from a sweep every 30 seconds after a restart. Temporary failures retry over about 4 hours, like Shopify's own retries, and a job plans against the shop date it was received.
+- **Save the plan, then write.** Shopify has no transaction across several metaobject writes, so each fulfillment's plan (target quantities, not deltas) is saved first. A retried job finishes a half-applied plan instead of decrementing twice. If a merchant edited the batches in between, the plan is dropped and recorded as a discrepancy.
 - **Shortfalls are recorded, not hidden.** When fresh stock can't cover a fulfillment, the gap is saved as an `oversell` or `expired_stock_only` discrepancy, along with deleted products, lists too long to read and writes Shopify rejects. A rejection is recorded instead of retried, so it can't block the product's later fulfillments.
 - **`fulfillments/create`, not `orders/paid`.** Stock leaves on shipment, and partial fulfillments arrive as separate events. On a real partial fulfillment, the payload's `quantity` was the units shipped in that fulfillment.
 - **Minimal data access.** The scopes are `write_products`, `read_metaobjects` and `read_fulfillments`. The app requests no protected customer fields, which Shopify's docs say are then redacted from payloads, and it stores no customer data.
@@ -66,14 +69,14 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 
 ## Tech stack
 
-|                      |                                                                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| App framework        | React Router 7, `@shopify/shopify-app-react-router`                                                                            |
-| UI                   | Polaris web components, Preact (admin extension)                                                                               |
-| Data                 | Shopify metaobjects and metafields; Prisma with SQLite for sessions, webhook dedup, locks, fulfillment plans and discrepancies |
-| Shopify APIs         | Admin GraphQL API and webhooks, version 2026-07                                                                                |
-| Language and runtime | TypeScript (ES2024), Node.js 22.12 or newer                                                                                    |
-| Tests                | Vitest, against a separate SQLite test database                                                                                |
+|                      |                                                                                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| App framework        | React Router 7, `@shopify/shopify-app-react-router`                                                                                  |
+| UI                   | Polaris web components, Preact (admin extension)                                                                                     |
+| Data                 | Shopify metaobjects and metafields; Prisma with SQLite for sessions, webhook dedup, locks, fulfillment jobs, plans and discrepancies |
+| Shopify APIs         | Admin GraphQL API and webhooks, version 2026-07                                                                                      |
+| Language and runtime | TypeScript (ES2024), Node.js 22.12 or newer                                                                                          |
+| Tests                | Vitest, against a separate SQLite test database                                                                                      |
 
 ### Dependency pins
 
@@ -86,6 +89,7 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 ```
 app/
   routes/        dashboard, privacy page, auth, webhook handlers
+  fulfillment-jobs.server.ts     save, run, retry and sweep fulfillment jobs
   fulfillment.server.ts          apply a fulfillment to each product's batches
   fulfillment-shopify.server.ts  read and write batches through the Admin API
   product-lock.server.ts

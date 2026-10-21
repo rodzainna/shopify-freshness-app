@@ -49,6 +49,7 @@ describe("compliance webhooks", () => {
       locks: [otherShop],
       plans: [otherShop],
       discrepancies: [otherShop],
+      jobs: [otherShop],
     });
   });
 
@@ -61,6 +62,7 @@ describe("compliance webhooks", () => {
         locks: shops.toSorted(),
         plans: shops.toSorted(),
         discrepancies: shops.toSorted(),
+        jobs: shops.toSorted(),
       });
     },
   );

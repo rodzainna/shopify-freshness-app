@@ -24,6 +24,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     db.session.deleteMany({ where }),
     db.productLock.deleteMany({ where }),
     db.fulfillmentPlan.deleteMany({ where }),
+    db.fulfillmentJob.deleteMany({ where }),
   ]);
 
   await markWebhookProcessed(webhookId, topic);

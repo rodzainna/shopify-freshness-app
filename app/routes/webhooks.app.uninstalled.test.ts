@@ -54,6 +54,7 @@ describe("app/uninstalled webhook", () => {
       locks: [otherShop],
       plans: [otherShop],
       discrepancies: shops.toSorted(),
+      jobs: [otherShop],
     });
   });
 });
