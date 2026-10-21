@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import db from "./db.server";
 import { processFulfillment } from "./fulfillment.server";
+import { ProductLockBusyError } from "./product-lock.server";
 import { fakeShopify } from "../test/fake-shopify";
 
 const shop = "fulfillment-process-test.myshopify.com";
@@ -19,8 +20,8 @@ async function clearTestData() {
   await db.productLock.deleteMany({ where });
 }
 
-function setup() {
-  const shopify = fakeShopify();
+function setup(options?: Parameters<typeof fakeShopify>[0]) {
+  const shopify = fakeShopify(options);
   shopify.addProduct(productId, {
     [SOON]: { quantity: 3, expirationDate: "2026-10-22" },
     [LATER]: { quantity: 10, expirationDate: "2026-11-05" },
@@ -39,14 +40,14 @@ const discrepancies = () =>
     orderBy: { reason: "asc" },
   });
 
-describe("processFulfillment", () => {
-  beforeEach(async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    await clearTestData();
-  });
-  afterEach(clearTestData);
-  afterEach(() => vi.restoreAllMocks());
+beforeEach(async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  await clearTestData();
+});
+afterEach(clearTestData);
+afterEach(() => vi.restoreAllMocks());
 
+describe("processFulfillment", () => {
   it("takes from the soonest batches and updates the product", async () => {
     const { shopify, fulfill } = setup();
 
@@ -327,6 +328,59 @@ describe("processFulfillment", () => {
 
     await fulfill("gid://shopify/Fulfillment/1", 1);
 
+    expect(await db.productLock.count({ where: { shop } })).toBe(0);
+  });
+});
+
+describe("concurrent fulfillments of one product", () => {
+  it("applies both without losing either update", async () => {
+    // Each call takes 40ms, so both read the batches before either writes
+    // unless the lock makes the second wait
+    const { shopify, fulfill } = setup({ delayMs: 40 });
+
+    await Promise.all([
+      fulfill("gid://shopify/Fulfillment/1", 5),
+      fulfill("gid://shopify/Fulfillment/2", 1),
+    ]);
+
+    // 13 units - 5 - 1, in whichever order the lock let them through
+    expect(shopify.batch(SOON)).toBeUndefined();
+    expect(shopify.batch(LATER)?.quantity).toBe(7);
+    expect(shopify.product(productId)?.batchIds).toStrictEqual([LATER]);
+    expect(await discrepancies()).toStrictEqual([]);
+    expect(
+      await db.fulfillmentPlan.count({ where: { shop, appliedAt: null } }),
+    ).toBe(0);
+    expect(await db.productLock.count({ where: { shop } })).toBe(0);
+  });
+
+  it("rejects a fulfillment blocked past the lock wait, then applies its retry once", async () => {
+    const { shopify, fulfill } = setup();
+    // Another delivery holds the product for longer than the lock wait
+    await db.productLock.create({
+      data: {
+        shop,
+        productId,
+        token: "other-delivery",
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    await expect(fulfill("gid://shopify/Fulfillment/1", 1)).rejects.toThrow(
+      ProductLockBusyError,
+    );
+    expect(shopify.calls).toStrictEqual([]);
+
+    // The holder finishes, then Shopify retries the 503
+    await db.productLock.deleteMany({ where: { shop } });
+    await fulfill("gid://shopify/Fulfillment/1", 1);
+
+    expect(shopify.batch(SOON)?.quantity).toBe(2);
+    expect(shopify.batch(LATER)?.quantity).toBe(10);
+    expect(await discrepancies()).toStrictEqual([]);
+    expect(
+      await db.fulfillmentPlan.count({ where: { shop, appliedAt: null } }),
+    ).toBe(0);
     expect(await db.productLock.count({ where: { shop } })).toBe(0);
   });
 });
