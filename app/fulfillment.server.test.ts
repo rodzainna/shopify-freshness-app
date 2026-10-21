@@ -40,14 +40,14 @@ const discrepancies = () =>
     orderBy: { reason: "asc" },
   });
 
-describe("processFulfillment", () => {
-  beforeEach(async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    await clearTestData();
-  });
-  afterEach(clearTestData);
-  afterEach(() => vi.restoreAllMocks());
+beforeEach(async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  await clearTestData();
+});
+afterEach(clearTestData);
+afterEach(() => vi.restoreAllMocks());
 
+describe("processFulfillment", () => {
   it("takes from the soonest batches and updates the product", async () => {
     const { shopify, fulfill } = setup();
 
@@ -333,13 +333,6 @@ describe("processFulfillment", () => {
 });
 
 describe("concurrent fulfillments of one product", () => {
-  beforeEach(async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    await clearTestData();
-  });
-  afterEach(clearTestData);
-  afterEach(() => vi.restoreAllMocks());
-
   it("applies both without losing either update", async () => {
     // Each call takes 40ms, so both read the batches before either writes
     // unless the lock makes the second wait
