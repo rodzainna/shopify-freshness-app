@@ -25,7 +25,7 @@ describe("webhook dedup", () => {
     expect(await isDuplicateWebhook(testWebhookId)).toBe(false);
   });
 
-  it("treats a previously recorded webhook ID as a d duplicate", async () => {
+  it("treats a previously recorded webhook ID as a duplicate", async () => {
     await markWebhookProcessed(testWebhookId, "app/uninstalled");
     expect(await isDuplicateWebhook(testWebhookId)).toBe(true);
   });
@@ -57,7 +57,7 @@ describe("authenticateWebhookSafely", () => {
     expect(result).toBe(fakeContext);
   });
 
-  it("re-throws a Response unchange (ex: a real HMAC failure)", async () => {
+  it("re-throws a Response unchanged (ex: a real HMAC failure)", async () => {
     const unauthorized = new Response(undefined, { status: 401 });
     vi.mocked(authenticate.webhook).mockRejectedValueOnce(unauthorized);
 
