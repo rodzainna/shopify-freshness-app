@@ -8,16 +8,21 @@ export async function isDuplicateWebhook(webhookId: string): Promise<boolean> {
   return existing !== null;
 }
 
-export async function markWebhookProcessed(
-  webhookId: string,
-  topic: string,
-): Promise<void> {
+// A query, so a caller can run it in the same transaction as its own writes
+export function processedWebhookQuery(webhookId: string, topic: string) {
   // Upsert: an overlapping retry of the same webhook may have marked it first
-  await db.processedWebhook.upsert({
+  return db.processedWebhook.upsert({
     where: { id: webhookId },
     create: { id: webhookId, topic },
     update: {},
   });
+}
+
+export async function markWebhookProcessed(
+  webhookId: string,
+  topic: string,
+): Promise<void> {
+  await processedWebhookQuery(webhookId, topic);
 }
 
 export async function authenticateWebhookSafely(request: Request) {

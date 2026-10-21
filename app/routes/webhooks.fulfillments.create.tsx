@@ -1,17 +1,22 @@
 import type { ActionFunctionArgs } from "react-router";
-import { processFulfillment } from "../fulfillment.server";
-import { readShopToday } from "../fulfillment-shopify.server";
-import { ProductLockBusyError } from "../product-lock.server";
+import db from "../db.server";
+import {
+  runFulfillmentJob,
+  saveFulfillmentJob,
+} from "../fulfillment-jobs.server";
 import {
   authenticateWebhookSafely,
   isDuplicateWebhook,
   markWebhookProcessed,
+  processedWebhookQuery,
 } from "../webhooks.server";
 import {
   groupLineItemsByProduct,
   toFulfillmentGid,
 } from "../../shared/fulfillment";
 
+// Saves the fulfillment as a job and replies at once: Shopify allows 5s, and
+// applying it takes about 2s per product.
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, webhookId, payload, admin } =
     await authenticateWebhookSafely(request);
@@ -39,23 +44,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (skipped.length > 0) {
     console.warn(`Skipped line items in ${fulfillmentId}:`, skipped);
   }
-
-  const started = Date.now();
-  try {
-    const today = await readShopToday(admin, new Date());
-    await processFulfillment({ admin, shop, fulfillmentId, today }, products);
-  } catch (error) {
-    // Another delivery holds a product; Shopify retries a 503 later
-    if (error instanceof ProductLockBusyError) {
-      console.warn(error.message);
-      return new Response(undefined, { status: 503 });
-    }
-    throw error;
+  if (products.length === 0) {
+    await markWebhookProcessed(webhookId, topic);
+    return new Response();
   }
-  console.log(
-    `Processed ${fulfillmentId} (${products.length} products) in ${Date.now() - started}ms`,
-  );
 
-  await markWebhookProcessed(webhookId, topic);
+  // Together, so a webhook is never marked processed without its job
+  await db.$transaction([
+    saveFulfillmentJob({
+      shop,
+      fulfillmentId,
+      products,
+      receivedAt: new Date(),
+    }),
+    processedWebhookQuery(webhookId, topic),
+  ]);
+
+  // Not awaited: the sweep retries the job if this run fails or never starts
+  runFulfillmentJob({ shop, fulfillmentId }).catch((error: unknown) => {
+    console.error(`Failed to start ${fulfillmentId} for ${shop}`, error);
+  });
   return new Response();
 };
