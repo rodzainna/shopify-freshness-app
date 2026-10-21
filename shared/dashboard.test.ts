@@ -366,13 +366,13 @@ describe("toDashboardRows", () => {
       });
     });
 
-    it("counts the excess from the stock shown when it's oversold", () => {
+    it("treats oversold stock as none, like the panel", () => {
       const [row] = toDashboardRows(
         [milk({ tracksInventory: true, totalInventory: -5 })],
         TODAY,
       );
 
-      expect(row).toMatchObject({ stock: -5, overStock: 35 });
+      expect(row).toMatchObject({ stock: -5, overStock: 30 });
     });
 
     // The loaded batches are a lower bound on the real total

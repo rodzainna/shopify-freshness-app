@@ -208,8 +208,7 @@ export default function Dashboard() {
                     ))}
                     {row.hiddenBatches > 0 && (
                       <s-text color="subdued">
-                        +{row.hiddenBatches}
-                        {row.hasMoreBatches && "+"} more batches
+                        {formatHiddenBatches(row)}
                       </s-text>
                     )}
                   </s-stack>
@@ -233,6 +232,12 @@ export default function Dashboard() {
 function formatBatchTotal({ batchTotal, hasMoreBatches }: DashboardRow) {
   if (batchTotal === null) return "—";
   return hasMoreBatches ? `${batchTotal}+` : String(batchTotal);
+}
+
+// "1 more batch", or "240+ more batches" when some didn't load
+function formatHiddenBatches({ hiddenBatches, hasMoreBatches }: DashboardRow) {
+  if (hasMoreBatches) return `${hiddenBatches}+ more batches`;
+  return `${hiddenBatches} more ${hiddenBatches === 1 ? "batch" : "batches"}`;
 }
 
 function statusTone(status: DashboardRow["status"]) {

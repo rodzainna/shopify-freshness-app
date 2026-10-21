@@ -5,14 +5,8 @@ import {
   computeBatchFreshness,
   isCalendarDate,
 } from "./freshness";
-import {
-  type ProductInventory,
-  exceedsStock,
-  getUnbatchedStock,
-  totalBatchQuantity,
-} from "./inventory";
+import { type ProductInventory, compareStock } from "./inventory";
 import { type BatchNode, isReadableBatch } from "./product-metafields";
-import { validateBatch } from "./validation";
 
 // The dashboard query's product shape (see app/routes/app._index.tsx)
 export interface DashboardProductNode extends ProductInventory {
@@ -65,13 +59,10 @@ export interface DashboardRow {
   hasMoreBatches: boolean;
   // null when Shopify doesn't track the product's inventory
   stock: number | null;
-  // Units across loaded batches; null when the batches can't be read
+  // From compareStock; batchTotal is null when the batches can't be read
   batchTotal: number | null;
-  // Batches with an invalid quantity, left out of batchTotal
   uncountedBatches: number;
-  // Units over the stock shown, when exceedsStock; a lower bound if some didn't load
   overStock: number | null;
-  // Stock not in any batch; only for products with batches, and all of them loaded
   unbatchedStock: number | null;
 }
 
@@ -116,8 +107,6 @@ export function toDashboardRows(
       };
     });
 
-    // Loaded batches are a lower bound, so a total already over stock is certain
-    const batchTotal = totalBatchQuantity(batches);
     const hasMoreBatches = references?.pageInfo.hasNextPage ?? false;
     return {
       ...row,
@@ -125,16 +114,7 @@ export function toDashboardRows(
       batches: batches.slice(0, SHOWN_BATCHES),
       hiddenBatches: Math.max(0, batches.length - SHOWN_BATCHES),
       hasMoreBatches,
-      batchTotal,
-      uncountedBatches: batches.filter((batch) => validateBatch(batch).quantity)
-        .length,
-      overStock: exceedsStock(batchTotal, product)
-        ? batchTotal - product.totalInventory
-        : null,
-      unbatchedStock:
-        batches.length > 0 && !hasMoreBatches
-          ? getUnbatchedStock(batchTotal, product)
-          : null,
+      ...compareStock(batches, product, !hasMoreBatches),
     };
   });
 }

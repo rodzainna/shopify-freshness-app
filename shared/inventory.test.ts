@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  exceedsStock,
+  compareStock,
   formatInventoryMismatch,
   formatUnbatchedStock,
   getInventoryMismatch,
-  getUnbatchedStock,
 } from "./inventory";
 import { MAX_QUANTITY } from "./validation";
 
@@ -77,21 +76,76 @@ describe("getInventoryMismatch", () => {
   });
 });
 
-describe("exceedsStock", () => {
-  const tracked = (totalInventory: number) => ({
-    tracksInventory: true,
-    totalInventory,
+describe("compareStock", () => {
+  const batches = (...quantities: number[]) =>
+    quantities.map((quantity) => ({ quantity, expirationDate: "2026-11-02" }));
+
+  it("counts units over stock", () => {
+    expect(compareStock(batches(10, 20), tracked(25))).toStrictEqual({
+      batchTotal: 30,
+      uncountedBatches: 0,
+      overStock: 5,
+      unbatchedStock: null,
+    });
   });
 
+  it("counts stock that isn't in a batch", () => {
+    expect(compareStock(batches(8), tracked(10))).toMatchObject({
+      overStock: null,
+      unbatchedStock: 2,
+    });
+  });
+
+  it("finds nothing to flag when they match", () => {
+    expect(compareStock(batches(10), tracked(10))).toMatchObject({
+      overStock: null,
+      unbatchedStock: null,
+    });
+  });
+
+  // Oversold stock counts as none, so the excess never exceeds the batches
   it.each([
-    [31, tracked(30), true],
-    [30, tracked(30), false],
-    [1, tracked(-5), true],
-    // Oversold stock counts as none, so no batches isn't over it
-    [0, tracked(-5), false],
-    [99, { tracksInventory: false, totalInventory: 0 }, false],
-  ])("%i units against %o is %s", (batchTotal, inventory, expected) => {
-    expect(exceedsStock(batchTotal, inventory)).toBe(expected);
+    [batches(3), 3],
+    [[], null],
+  ])("treats oversold stock as none (%j)", (list, overStock) => {
+    expect(compareStock(list, tracked(-5)).overStock).toBe(overStock);
+  });
+
+  it("counts invalid quantities separately and doesn't call stock unbatched", () => {
+    expect(compareStock(batches(10, 1.5, 0), tracked(12))).toStrictEqual({
+      batchTotal: 10,
+      uncountedBatches: 2,
+      overStock: null,
+      unbatchedStock: null,
+    });
+  });
+
+  it("still flags over stock when not every batch loaded", () => {
+    expect(compareStock(batches(30), tracked(25), false)).toMatchObject({
+      overStock: 5,
+      unbatchedStock: null,
+    });
+  });
+
+  it("doesn't call stock unbatched when not every batch loaded", () => {
+    expect(
+      compareStock(batches(8), tracked(10), false).unbatchedStock,
+    ).toBeNull();
+  });
+
+  it("doesn't call stock unbatched when the product has no batches", () => {
+    expect(compareStock([], tracked(50)).unbatchedStock).toBeNull();
+  });
+
+  it("flags nothing when inventory isn't tracked", () => {
+    expect(
+      compareStock(batches(30), { tracksInventory: false, totalInventory: 5 }),
+    ).toStrictEqual({
+      batchTotal: 30,
+      uncountedBatches: 0,
+      overStock: null,
+      unbatchedStock: null,
+    });
   });
 });
 
@@ -105,23 +159,6 @@ describe("formatInventoryMismatch", () => {
     [{ batchTotal: 5, inStock: 0 }, "Batches total 5, but none are in stock."],
   ])("describes %o", (mismatch, message) => {
     expect(formatInventoryMismatch(mismatch)).toBe(message);
-  });
-});
-
-describe("getUnbatchedStock", () => {
-  const tracked = (totalInventory: number) => ({
-    tracksInventory: true,
-    totalInventory,
-  });
-
-  it.each([
-    [8, tracked(10), 2],
-    [10, tracked(10), null],
-    [12, tracked(10), null],
-    [0, tracked(-5), null],
-    [8, { tracksInventory: false, totalInventory: 10 }, null],
-  ])("%i in batches against %o is %s", (batchTotal, inventory, expected) => {
-    expect(getUnbatchedStock(batchTotal, inventory)).toBe(expected);
   });
 });
 
