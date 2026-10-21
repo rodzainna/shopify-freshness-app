@@ -72,7 +72,7 @@ export async function withProductLock<T>(
   fn: () => Promise<T>,
   { waitMs = 1_500, pollMs = 250 } = {},
 ): Promise<T> {
-  // Short wait: Shopify needs a webhook response within 5 seconds.
+  // Short by default; background jobs pass a longer wait.
   const deadline = Date.now() + waitMs;
   let token = await acquireProductLock(shop, productId);
   while (token === null && Date.now() < deadline) {

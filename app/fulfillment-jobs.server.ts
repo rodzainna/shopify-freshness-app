@@ -23,6 +23,9 @@ export const STALE_RUN_MS = 5 * 60_000;
 
 const SWEEP_INTERVAL_MS = 30_000;
 
+// Long enough to outwait another run on the same product, under the lock's 30s expiry
+const LOCK_WAIT_MS = 10_000;
+
 // Pending and due, or held by a run that has likely crashed
 function runnable(now: Date): Prisma.FulfillmentJobWhereInput {
   return {
@@ -73,7 +76,13 @@ export async function runFulfillmentJob(
     // The day it was received, so a retry after midnight plans the same way
     const today = await readShopToday(admin, job.receivedAt);
     await processFulfillment(
-      { admin, shop: job.shop, fulfillmentId: job.fulfillmentId, today },
+      {
+        admin,
+        shop: job.shop,
+        fulfillmentId: job.fulfillmentId,
+        today,
+        lockWaitMs: LOCK_WAIT_MS,
+      },
       job.products as unknown as ProductQuantity[],
     );
   } catch (error) {

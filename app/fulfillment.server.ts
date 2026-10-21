@@ -23,8 +23,10 @@ export interface FulfillmentContext {
   admin: AdminApiContext;
   shop: string;
   fulfillmentId: string;
-  // The shop-local "today", read once per webhook
+  // The shop-local "today", read once per job
   today: string;
+  // How long to wait for a product another run is updating
+  lockWaitMs?: number;
 }
 
 type PlanKey = Pick<FulfillmentPlan, "shop" | "fulfillmentId" | "productId">;
@@ -47,8 +49,11 @@ export async function processFulfillment(
   products: ProductQuantity[],
 ): Promise<void> {
   for (const { productId, quantity } of products) {
-    await withProductLock(context.shop, productId, () =>
-      processProduct(context, productId, quantity),
+    await withProductLock(
+      context.shop,
+      productId,
+      () => processProduct(context, productId, quantity),
+      { waitMs: context.lockWaitMs },
     );
   }
 }

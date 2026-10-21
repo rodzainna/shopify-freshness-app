@@ -184,6 +184,29 @@ describe("runFulfillmentJob", () => {
     expect(await job()).toMatchObject({ claimedAt: reclaimedAt });
   });
 
+  it("waits out another run on the same product instead of retrying", async () => {
+    const shopify = setup();
+    await saveJob();
+    await db.productLock.create({
+      data: {
+        shop,
+        productId,
+        token: "other-run",
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    // The other run finishes after 2s, past the 1.5s default wait
+    // Awaited: a Prisma query doesn't run until something awaits it
+    setTimeout(async () => {
+      await db.productLock.deleteMany({ where: { shop, token: "other-run" } });
+    }, 2_000);
+
+    await runFulfillmentJob(key, afterMidnight);
+
+    expect(shopify.batch(BATCH)?.quantity).toBe(3);
+    expect(await job()).toBeNull();
+  }, 15_000);
+
   it("retries a temporary failure after a delay", async () => {
     const shopify = setup();
     shopify.failNext("GetProductBatches");
