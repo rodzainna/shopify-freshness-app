@@ -6,6 +6,7 @@ import { authenticate } from "../shopify.server";
 import {
   type DashboardProductNode,
   type DashboardRow,
+  ADMIN_PRODUCTS,
   UNREADABLE,
   toDashboardRows,
 } from "../../shared/dashboard";
@@ -40,7 +41,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         products(first: $productLimit, sortKey: TITLE) {
           nodes {
             id
+            legacyResourceId
             title
+            featuredMedia {
+              preview {
+                image {
+                  url(transform: { maxWidth: 80, maxHeight: 80 })
+                  altText
+                }
+              }
+            }
             earliestExpiration: metafield(key: "earliest_expiration_date") {
               value
             }
@@ -94,7 +104,7 @@ export default function Dashboard() {
               Add a product, then track its batches from the Freshness batches
               block on the product page.
             </s-paragraph>
-            <s-button variant="primary" href="shopify://admin/products/new">
+            <s-button variant="primary" href={`${ADMIN_PRODUCTS}/new`}>
               Add product
             </s-button>
           </s-stack>
@@ -117,7 +127,16 @@ export default function Dashboard() {
           <s-table-body>
             {rows.map((row) => (
               <s-table-row key={row.id}>
-                <s-table-cell>{row.title}</s-table-cell>
+                <s-table-cell>
+                  <s-stack direction="inline" gap="small" alignItems="center">
+                    <s-thumbnail
+                      src={row.imageUrl ?? undefined}
+                      alt=""
+                      size="small"
+                    />
+                    <s-link href={row.adminUrl}>{row.title}</s-link>
+                  </s-stack>
+                </s-table-cell>
                 <s-table-cell>
                   <s-badge tone={statusTone(row.status)}>{row.status}</s-badge>
                 </s-table-cell>
