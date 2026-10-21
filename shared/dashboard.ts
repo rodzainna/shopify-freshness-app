@@ -10,7 +10,12 @@ import { type BatchNode, isReadableBatch } from "./product-metafields";
 // The dashboard query's product shape (see app/routes/app._index.tsx)
 export interface DashboardProductNode {
   id: string;
+  // The numeric id admin URLs take
+  legacyResourceId: string;
   title: string;
+  featuredMedia: {
+    preview: { image: { url: string; altText: string | null } | null } | null;
+  } | null;
   earliestExpiration: { value: string } | null;
   freshnessBatches: {
     references: {
@@ -29,12 +34,17 @@ export interface DashboardBatch {
   freshness: BatchFreshness | null;
 }
 
+export const ADMIN_PRODUCTS = "shopify://admin/products";
+
 // A batch in the list didn't resolve, so the row can't show a status
 export const UNREADABLE = "Can't read batches";
 
 export interface DashboardRow {
   id: string;
   title: string;
+  adminUrl: string;
+  // null when the product has no image, so the thumbnail shows a placeholder
+  imageUrl: string | null;
   earliestExpirationDate: string | null;
   // Worst status among in-stock batches (computeAggregateFreshness)
   status: FreshnessStatus | "Not set" | typeof UNREADABLE;
@@ -53,6 +63,8 @@ export function toDashboardRows(
     const row = {
       id: product.id,
       title: product.title,
+      adminUrl: `${ADMIN_PRODUCTS}/${product.legacyResourceId}`,
+      imageUrl: product.featuredMedia?.preview?.image?.url ?? null,
       earliestExpirationDate: product.earliestExpiration?.value ?? null,
     };
     if (!nodes.every(isReadableBatch)) {

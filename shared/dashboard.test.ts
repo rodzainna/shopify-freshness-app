@@ -13,7 +13,9 @@ function product(
 ): DashboardProductNode {
   return {
     id: "gid://shopify/Product/1",
+    legacyResourceId: "1",
     title: "Sourdough loaf",
+    featuredMedia: null,
     earliestExpiration: null,
     freshnessBatches: null,
     ...overrides,
@@ -51,6 +53,8 @@ describe("toDashboardRows", () => {
     expect(row).toStrictEqual({
       id: "gid://shopify/Product/1",
       title: "Sourdough loaf",
+      adminUrl: "shopify://admin/products/1",
+      imageUrl: null,
       earliestExpirationDate: "2026-10-10",
       status: "Expired",
       batches: [
@@ -76,6 +80,8 @@ describe("toDashboardRows", () => {
       {
         id: "gid://shopify/Product/1",
         title: "Sourdough loaf",
+        adminUrl: "shopify://admin/products/1",
+        imageUrl: null,
         earliestExpirationDate: null,
         status: "Not set",
         batches: [],
@@ -130,6 +136,8 @@ describe("toDashboardRows", () => {
       {
         id: "gid://shopify/Product/1",
         title: "Sourdough loaf",
+        adminUrl: "shopify://admin/products/1",
+        imageUrl: null,
         earliestExpirationDate: "2026-10-10",
         status: UNREADABLE,
         batches: [],
@@ -267,6 +275,26 @@ describe("toDashboardRows", () => {
     expect(statusOn("2026-10-22")).toStrictEqual(["Use Soon", "Use Soon"]); // 3 days
     expect(statusOn("2026-10-25")).toStrictEqual(["Use Soon", "Use Soon"]); // expiry day
     expect(statusOn("2026-10-26")).toStrictEqual(["Expired", "Expired"]); // 1 day past
+  });
+
+  it("links to the product's admin page and passes on its image", () => {
+    const image = { url: "https://cdn.shopify.com/loaf.jpg", altText: null };
+    const [withImage, withoutImage] = toDashboardRows(
+      [
+        product({
+          legacyResourceId: "9658528694493",
+          featuredMedia: { preview: { image } },
+        }),
+        product({ id: "gid://shopify/Product/2" }),
+      ],
+      TODAY,
+    );
+
+    expect(withImage).toMatchObject({
+      adminUrl: "shopify://admin/products/9658528694493",
+      imageUrl: "https://cdn.shopify.com/loaf.jpg",
+    });
+    expect(withoutImage.imageUrl).toBeNull();
   });
 
   it("returns no rows for a store with no products", () => {
