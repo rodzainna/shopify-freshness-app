@@ -25,7 +25,8 @@ describe("parseDashboardFilters", () => {
       "shop=x.myshopify.com&q=+milk+&type=Dairy&type=Cheese&vendor=Acme",
     );
 
-    expect(parseDashboardFilters(params)).toMatchObject({
+    expect(parseDashboardFilters(params)).toStrictEqual({
+      ...none,
       search: "milk",
       types: ["Dairy", "Cheese"],
       vendors: ["Acme"],
@@ -126,6 +127,7 @@ describe("row filters", () => {
     adminUrl: "shopify://admin/products/1",
     imageUrl: null,
     earliestExpirationDate: null,
+    tracked: false,
     status: "Not set",
     batches: [],
     hiddenBatches: 0,
@@ -145,20 +147,33 @@ describe("row filters", () => {
   };
   const milk = row({
     id: "milk",
+    tracked: true,
     status: "Expired",
     batches: [batch],
     overStock: 5,
   });
   const cheddar = row({
     id: "cheddar",
+    tracked: true,
     status: "Fresh",
     batches: [batch],
     unbatchedStock: 2,
   });
-  const eggs = row({ id: "eggs", status: "Fresh", batches: [batch] });
-  const loaf = row({ id: "loaf", status: "Use Soon", batches: [batch] });
+  const eggs = row({
+    id: "eggs",
+    tracked: true,
+    status: "Fresh",
+    batches: [batch],
+  });
+  const loaf = row({
+    id: "loaf",
+    tracked: true,
+    status: "Use Soon",
+    batches: [batch],
+  });
   const liquid = row({
     id: "liquid",
+    tracked: true,
     status: "Can't read batches",
     batchTotal: null,
   });

@@ -11,7 +11,8 @@ export const STATUS_FILTERS = {
 
 export const STOCK_FILTERS = {
   over: "Over stock",
-  unbatched: "Unbatched",
+  // Matches the badge, which only products with batches get
+  unbatched: "Unbatched (has batches)",
 } as const;
 
 export type StatusFilter = keyof typeof STATUS_FILTERS;
@@ -85,7 +86,7 @@ export function filterRows(
       (statuses.size === 0 || statuses.has(row.status)) &&
       (filters.stock.length === 0 ||
         filters.stock.some((issue) => hasStockIssue(row, issue))) &&
-      (!filters.tracked || isTracked(row)),
+      (!filters.tracked || row.tracked),
   );
 }
 
@@ -93,11 +94,6 @@ function hasStockIssue(row: DashboardRow, issue: StockFilter): boolean {
   return issue === "over"
     ? row.overStock !== null
     : row.unbatchedStock !== null;
-}
-
-// Has batches, readable or not
-function isTracked(row: DashboardRow): boolean {
-  return row.status === UNREADABLE || row.batches.length > 0;
 }
 
 /**

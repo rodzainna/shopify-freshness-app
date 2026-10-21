@@ -60,6 +60,7 @@ describe("toDashboardRows", () => {
       adminUrl: "shopify://admin/products/1",
       imageUrl: null,
       earliestExpirationDate: "2026-10-10",
+      tracked: true,
       status: "Expired",
       batches: [
         {
@@ -93,6 +94,7 @@ describe("toDashboardRows", () => {
         adminUrl: "shopify://admin/products/1",
         imageUrl: null,
         earliestExpirationDate: null,
+        tracked: false,
         status: "Not set",
         batches: [],
         hiddenBatches: 0,
@@ -155,6 +157,7 @@ describe("toDashboardRows", () => {
         adminUrl: "shopify://admin/products/1",
         imageUrl: null,
         earliestExpirationDate: "2026-10-10",
+        tracked: true,
         status: UNREADABLE,
         batches: [],
         hiddenBatches: 0,
@@ -468,6 +471,28 @@ describe("toDashboardRows", () => {
       hiddenBatches: 3,
       batchTotal: SHOWN_BATCHES + 3,
     });
+  });
+
+  it("is tracked only when its batch list has a batch", () => {
+    const emptyList = product({
+      freshnessBatches: {
+        references: { nodes: [], pageInfo: { hasNextPage: false } },
+      },
+    });
+    const withBatch = product({
+      freshnessBatches: {
+        references: {
+          nodes: [batch("gid://shopify/Metaobject/1", "1", "2026-11-02")],
+          pageInfo: { hasNextPage: false },
+        },
+      },
+    });
+
+    expect(
+      toDashboardRows([product(), emptyList, withBatch], TODAY).map(
+        ({ tracked }) => tracked,
+      ),
+    ).toStrictEqual([false, false, true]);
   });
 
   it("returns no rows for a store with no products", () => {

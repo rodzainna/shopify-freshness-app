@@ -50,6 +50,8 @@ export interface DashboardRow {
   // null when the product has no image, so the thumbnail shows a placeholder
   imageUrl: string | null;
   earliestExpirationDate: string | null;
+  // Has a batch list with at least one batch, readable or not
+  tracked: boolean;
   // Worst status among in-stock batches (computeAggregateFreshness)
   status: FreshnessStatus | "Not set" | typeof UNREADABLE;
   // The first SHOWN_BATCHES; hiddenBatches counts the rest that loaded
@@ -80,6 +82,7 @@ export function toDashboardRows(
       imageUrl: product.featuredMedia?.preview?.image?.url ?? null,
       earliestExpirationDate: product.earliestExpiration?.value ?? null,
       stock: product.tracksInventory ? product.totalInventory : null,
+      tracked: nodes.length > 0,
     };
     if (!nodes.every(isReadableBatch)) {
       return {

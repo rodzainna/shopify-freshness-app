@@ -109,13 +109,16 @@ export function DashboardFilterBar({
     }
   }
 
+  const searchField = useLiveProperty("s-search-field", "value", controls.text);
+  const trackedBox = useLiveProperty("s-checkbox", "checked", filters.tracked);
+
   return (
     <s-stack slot="filters" direction="inline" gap="small-200">
       <s-search-field
+        ref={searchField}
         label="Search products"
         labelAccessibilityVisibility="exclusive"
         placeholder="Search products"
-        value={controls.text}
         onInput={(event) => controls.search(event.currentTarget.value)}
       />
       <FilterButton
@@ -149,8 +152,8 @@ export function DashboardFilterBar({
         onApply={(values) => controls.setFilter(FILTER_PARAMS.vendor, values)}
       />
       <s-checkbox
+        ref={trackedBox}
         label="Tracked only"
-        checked={filters.tracked || undefined}
         onChange={(event) =>
           controls.setFilter(
             FILTER_PARAMS.tracked,
@@ -179,6 +182,7 @@ function FilterButton({
   onApply: (values: string[]) => void;
 }) {
   const [draft, setDraft] = useState(selected);
+  const choiceList = useLiveProperty("s-choice-list", "values", draft);
   // Keep selected values that aren't in the list (renamed, or past its limit) so they can be unticked
   const listed = new Set(options?.map(({ value }) => value));
   const choices = [
@@ -208,18 +212,14 @@ function FilterButton({
               <s-spinner accessibilityLabel="Loading" />
             )}
             <s-choice-list
+              ref={choiceList}
               label={label}
               labelAccessibilityVisibility="exclusive"
               multiple
               onChange={(event) => setDraft([...event.currentTarget.values])}
             >
               {choices.map((choice) => (
-                <s-choice
-                  key={choice.value}
-                  value={choice.value}
-                  // React 18 renders false as the string "false", which counts as set
-                  selected={draft.includes(choice.value) || undefined}
-                >
+                <s-choice key={choice.value} value={choice.value}>
                   {choice.label}
                 </s-choice>
               ))}
@@ -266,4 +266,32 @@ function sameLabel(value: string): Option {
 
 function labelOf(options: Option[], value: string): string {
   return options.find((option) => option.value === value)?.label ?? value;
+}
+
+/**
+ * React 18 passes props to web components as attributes, and Polaris reads
+ * `value`, `checked` and `selected` attributes as the starting state only.
+ * This sets the live property instead, after every render. The tag types the ref.
+ */
+function useLiveProperty<
+  Tag extends keyof HTMLElementTagNameMap,
+  Name extends keyof HTMLElementTagNameMap[Tag],
+>(_tag: Tag, name: Name, value: HTMLElementTagNameMap[Tag][Name]) {
+  const ref = useRef<HTMLElementTagNameMap[Tag]>(null);
+  useEffect(() => {
+    if (ref.current && !sameValue(ref.current[name], value)) {
+      ref.current[name] = value;
+    }
+  });
+  return ref;
+}
+
+// Arrays by contents, so setting the same choices again is a no-op
+function sameValue(current: unknown, next: unknown) {
+  if (!Array.isArray(next)) return current === next;
+  return (
+    Array.isArray(current) &&
+    current.length === next.length &&
+    next.every((value, index) => current[index] === value)
+  );
 }
