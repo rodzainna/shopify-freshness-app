@@ -147,6 +147,43 @@ describe("runFulfillmentJob", () => {
     expect(await job()).toBeNull();
   });
 
+  it("leaves a job alone once a newer run has reclaimed it", async () => {
+    const shopify = setup();
+    await saveJob();
+    const reclaimedAt = new Date(afterMidnight.getTime() + STALE_RUN_MS);
+    // A newer run reclaims the job while this one is still working
+    const reclaim = () =>
+      db.fulfillmentJob.update({
+        where: { shop_fulfillmentId: key },
+        data: { claimedAt: reclaimedAt, attempts: 2 },
+      });
+
+    vi.mocked(unauthenticated.admin).mockImplementationOnce(async () => {
+      await reclaim();
+      throw new Error("Timed out");
+    });
+    await runFulfillmentJob(key, afterMidnight);
+    expect(await job()).toMatchObject({
+      status: "running",
+      claimedAt: reclaimedAt,
+      lastError: null,
+    });
+
+    await db.fulfillmentJob.update({
+      where: { shop_fulfillmentId: key },
+      data: { status: "pending", claimedAt: null, attempts: 0 },
+    });
+    vi.mocked(unauthenticated.admin).mockImplementationOnce(async () => {
+      await reclaim();
+      return { admin: shopify.admin } as Awaited<
+        ReturnType<typeof unauthenticated.admin>
+      >;
+    });
+    await runFulfillmentJob(key, afterMidnight);
+    // The newer run deletes it when it finishes
+    expect(await job()).toMatchObject({ claimedAt: reclaimedAt });
+  });
+
   it("retries a temporary failure after a delay", async () => {
     const shopify = setup();
     shopify.failNext("GetProductBatches");

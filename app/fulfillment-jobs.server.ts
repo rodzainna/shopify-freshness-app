@@ -81,8 +81,8 @@ export async function runFulfillmentJob(
     return;
   }
 
-  // deleteMany: an uninstall may have deleted the job during the run
-  await db.fulfillmentJob.deleteMany({ where: key });
+  // Only while this run still holds the job; an uninstall may also have deleted it
+  await db.fulfillmentJob.deleteMany({ where: heldBy(job) });
   console.log(
     `Applied ${job.fulfillmentId} for ${job.shop} in ${Date.now() - started}ms (attempt ${job.attempts})`,
   );
@@ -103,6 +103,16 @@ async function claimJob(
   });
 }
 
+// A run that outlived STALE_RUN_MS may have lost the job to a newer run,
+// so its writes match its own claim and leave a newer run's state alone
+function heldBy(job: FulfillmentJob): Prisma.FulfillmentJobWhereInput {
+  return {
+    shop: job.shop,
+    fulfillmentId: job.fulfillmentId,
+    claimedAt: job.claimedAt,
+  };
+}
+
 async function recordFailure(
   job: FulfillmentJob,
   error: unknown,
@@ -112,7 +122,7 @@ async function recordFailure(
   const delay = RETRY_DELAYS_MS[job.attempts - 1];
   // No session means the app was uninstalled, so a retry can't succeed
   const giveUp = error instanceof SessionNotFoundError || delay === undefined;
-  const where = { shop: job.shop, fulfillmentId: job.fulfillmentId };
+  const where = heldBy(job);
 
   if (giveUp) {
     await db.fulfillmentJob.updateMany({
