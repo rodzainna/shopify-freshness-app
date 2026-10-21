@@ -29,6 +29,7 @@ export function fakeShopify({ delayMs = 0 } = {}) {
   const rejections = new Map<string, number>();
   const payloadField: Record<string, string> = {
     SetBatchQuantity: "metaobjectUpdate",
+    SetBatchValues: "metaobjectUpdate",
     SaveProductFreshness: "metafieldsSet",
     DeleteBatch: "metaobjectDelete",
   };
@@ -72,6 +73,23 @@ export function fakeShopify({ delayMs = 0 } = {}) {
         };
       }
       batch.quantity = Number(quantity);
+      return { metaobjectUpdate: ok };
+    },
+    SetBatchValues: ({ id, metaobject }) => {
+      const batch = batches.get(id as string);
+      if (!batch) {
+        return {
+          metaobjectUpdate: userError("Record not found", "RECORD_NOT_FOUND"),
+        };
+      }
+      // Applies only the fields the mutation sends
+      const { fields } = metaobject as {
+        fields: { key: string; value: string }[];
+      };
+      for (const { key, value } of fields) {
+        if (key === "quantity") batch.quantity = Number(value);
+        if (key === "expiration_date") batch.expirationDate = value;
+      }
       return { metaobjectUpdate: ok };
     },
     SaveProductFreshness: (variables) => {

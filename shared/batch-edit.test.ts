@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 
 import {
   type EditableBatch,
-  earliestAfterEdits,
+  applyEdits,
+  parseBatchEditRequest,
   planBatchEdit,
   validateEdit,
 } from "./batch-edit";
@@ -104,14 +105,43 @@ describe("validateEdit", () => {
   });
 });
 
-describe("earliestAfterEdits", () => {
-  it("uses the written dates over the current ones", () => {
-    expect(earliestAfterEdits(opened, [loaf("a", 6, "2026-11-30")])).toBe(
-      "2026-10-28",
-    );
+describe("applyEdits", () => {
+  it("uses the written values over the current ones", () => {
+    expect(applyEdits(opened, [loaf("a", 4, "2026-11-30")])).toStrictEqual([
+      loaf("a", 4, "2026-11-30"),
+      opened[1],
+    ]);
   });
 
-  it("keeps the current date for a batch whose write failed", () => {
-    expect(earliestAfterEdits(opened, [])).toBe("2026-10-23");
+  it("keeps the current values for a batch whose write failed", () => {
+    expect(applyEdits(opened, [])).toStrictEqual(opened);
+  });
+});
+
+describe("parseBatchEditRequest", () => {
+  const body = {
+    productId: "gid://shopify/Product/1",
+    opened,
+    edited: opened,
+  };
+
+  it("accepts a well-formed request", () => {
+    expect(parseBatchEditRequest(body)).toStrictEqual(body);
+  });
+
+  it.each([
+    ["no body", null],
+    ["a product id that isn't a GID", { ...body, productId: "1" }],
+    ["a non-list of batches", { ...body, edited: "x" }],
+    [
+      "a quantity sent as text",
+      { ...body, edited: [{ ...opened[0], quantity: "6" }] },
+    ],
+    [
+      "a batch without an id",
+      { ...body, opened: [{ quantity: 1, expirationDate: "" }] },
+    ],
+  ])("rejects %s", (_case, value) => {
+    expect(parseBatchEditRequest(value)).toBeNull();
   });
 });

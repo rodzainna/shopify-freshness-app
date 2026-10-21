@@ -1,4 +1,5 @@
-import { type Batch, getEarliestExpirationDate } from "./freshness";
+import type { Batch } from "./freshness";
+import { PRODUCT_GID } from "./product-gid";
 import { type BatchErrors, hasErrors, validateBatch } from "./validation";
 
 export interface EditableBatch extends Batch {
@@ -22,11 +23,53 @@ export function validateEdit(batch: Batch): BatchErrors {
   return errors;
 }
 
+// The edits don't cover exactly the batches the editor opened with
+export class MismatchedEditsError extends Error {
+  constructor() {
+    super("The edits don't match the batches that were opened");
+    this.name = "MismatchedEditsError";
+  }
+}
+
+export interface BatchEditRequest {
+  productId: string;
+  opened: EditableBatch[];
+  edited: EditableBatch[];
+}
+
+/** The editor's request body, or null when it isn't shaped like one. */
+export function parseBatchEditRequest(body: unknown): BatchEditRequest | null {
+  if (!isRecord(body)) return null;
+  const { productId, opened, edited } = body;
+  if (typeof productId !== "string" || !PRODUCT_GID.test(productId)) {
+    return null;
+  }
+  if (!isBatchList(opened) || !isBatchList(edited)) return null;
+  return { productId, opened, edited };
+}
+
+function isBatchList(value: unknown): value is EditableBatch[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (batch) =>
+        isRecord(batch) &&
+        typeof batch.id === "string" &&
+        typeof batch.quantity === "number" &&
+        typeof batch.expirationDate === "string",
+    )
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 /**
  * Decides what a dashboard save writes. `opened` is what the editor showed,
  * `current` is read again under the product's lock, `edited` is the form.
  *
- * @throws if `edited` doesn't cover exactly the opened batches
+ * @throws MismatchedEditsError if `edited` doesn't cover exactly the opened batches
  */
 export function planBatchEdit(
   opened: EditableBatch[],
@@ -34,7 +77,7 @@ export function planBatchEdit(
   edited: EditableBatch[],
 ): BatchEditPlan {
   if (!sameIds(opened, edited)) {
-    throw new Error("The edits don't match the batches that were opened");
+    throw new MismatchedEditsError();
   }
 
   const errors: Record<string, BatchErrors> = {};
@@ -55,15 +98,13 @@ export function planBatchEdit(
     : { kind: "unchanged" };
 }
 
-/** The product's earliest date once `written` has been applied to `current`. */
-export function earliestAfterEdits(
+/** The batches once `written` has been applied to `current`. */
+export function applyEdits(
   current: EditableBatch[],
   written: EditableBatch[],
-): string | null {
+): EditableBatch[] {
   const writtenById = new Map(written.map((batch) => [batch.id, batch]));
-  return getEarliestExpirationDate(
-    current.map((batch) => writtenById.get(batch.id) ?? batch),
-  );
+  return current.map((batch) => writtenById.get(batch.id) ?? batch);
 }
 
 // Each opened batch exactly once
