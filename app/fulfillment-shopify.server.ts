@@ -10,6 +10,7 @@ import {
   SAVE_PRODUCT_FRESHNESS_MUTATION,
   type SaveProductFreshnessData,
   type UserErrorsPayload,
+  isReadableBatch,
   saveProductFreshnessVariables,
 } from "../shared/product-metafields";
 
@@ -70,12 +71,6 @@ export type ProductBatches =
   | { notTracked: true }
   | { problem: "product_not_found" | "too_many_batches" };
 
-function isReadable(
-  node: BatchNode | null,
-): node is BatchNode & { id: string } {
-  return Boolean(node?.id);
-}
-
 export async function readProductBatches(
   admin: AdminApiContext,
   productId: string,
@@ -112,7 +107,7 @@ export async function readProductBatches(
   if (!product.freshnessBatches) return { notTracked: true };
   const { references } = product.freshnessBatches;
   // Writing back a list we couldn't fully read would unlink batches, so stop
-  if (!references || !references.nodes.every(isReadable)) {
+  if (!references || !references.nodes.every(isReadableBatch)) {
     throw new PermanentShopifyError(
       `Product ${productId} has a batch list the app can't read`,
     );

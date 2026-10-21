@@ -5,6 +5,7 @@ import {
   computeBatchFreshness,
   isCalendarDate,
 } from "./freshness";
+import { isReadableBatch } from "./product-metafields";
 
 interface BatchNode {
   id?: string;
@@ -48,12 +49,6 @@ export interface DashboardRow {
   hasMoreBatches: boolean;
 }
 
-function isReadable(
-  node: BatchNode | null,
-): node is BatchNode & { id: string } {
-  return Boolean(node?.id);
-}
-
 export function toDashboardRows(
   products: DashboardProductNode[],
   today: string,
@@ -66,7 +61,7 @@ export function toDashboardRows(
       title: product.title,
       earliestExpirationDate: product.earliestExpiration?.value ?? null,
     };
-    if (!nodes.every(isReadable)) {
+    if (!nodes.every(isReadableBatch)) {
       return { ...row, status: UNREADABLE, batches: [], hasMoreBatches: false };
     }
 

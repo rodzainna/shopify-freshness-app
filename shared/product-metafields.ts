@@ -10,6 +10,14 @@ export interface MetafieldIdentifier {
   key: string;
 }
 
+// Shopify returns null for a batch reference that no longer resolves.
+// Writing back a list with one would unlink it, so callers stop instead.
+export function isReadableBatch<T extends { id?: string }>(
+  node: T | null,
+): node is T & { id: string } {
+  return Boolean(node?.id);
+}
+
 // Empty metafields are deleted, not set blank. metafieldsDelete needs the
 // namespace even though metafieldsSet defaults it to $app.
 export function planProductMetafieldWrites(
