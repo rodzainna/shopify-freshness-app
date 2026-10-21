@@ -15,6 +15,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       db.productLock.deleteMany({ where }),
       db.fulfillmentPlan.deleteMany({ where }),
       db.fulfillmentDiscrepancy.deleteMany({ where }),
+      db.fulfillmentJob.deleteMany({ where }),
     ]);
   }
 

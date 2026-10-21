@@ -86,3 +86,26 @@ model FulfillmentDiscrepancy {
   @@id([shop, fulfillmentId, productId, reason])
   @@index([shop, createdAt])
 }
+
+enum FulfillmentJobStatus {
+  pending
+  running
+  failed
+}
+
+// A received fulfillment waiting to be applied, so the webhook can reply
+// at once. Done jobs are deleted; failed ones keep their last error.
+model FulfillmentJob {
+  shop          String
+  fulfillmentId String
+  products      Json
+  receivedAt    DateTime
+  status        FulfillmentJobStatus @default(pending)
+  attempts      Int                  @default(0)
+  nextRunAt     DateTime
+  claimedAt     DateTime?
+  lastError     String?
+
+  @@id([shop, fulfillmentId])
+  @@index([status, nextRunAt])
+}

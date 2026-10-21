@@ -15,14 +15,15 @@ This notice describes the personal data Freshness Tracker processes, why, and ho
 - **Webhook IDs and topics,** so a redelivered webhook isn't applied twice.
 - **Short-lived product locks:** shop domain and product ID, expiring after 30 seconds.
 - **Fulfillment plans and discrepancies:** shop domain, fulfillment ID, product ID and batch quantities, so a retried fulfillment isn't applied twice and stock shortfalls are recorded.
+- **Fulfillment jobs:** shop domain, fulfillment ID, product IDs and quantities, and when the fulfillment was received, so the app can reply to Shopify at once and apply it just after. A job is deleted once applied; a failed one is kept with its last error.
 - **Batch records in the merchant's own store,** as metaobjects and metafields.
 
 The app doesn't sell, share or transfer data to third parties, and it doesn't use data for advertising, profiling or automated decisions about customers.
 
 ## Retention and deletion
 
-- **Uninstall:** the app deletes the store's session, locks and fulfillment plans. Discrepancies are kept until shop data erasure, so a quick reinstall keeps them.
-- **Shop data erasure:** Shopify's `shop/redact` webhook, sent after uninstall, deletes the store's session, locks, fulfillment plans and discrepancies.
+- **Uninstall:** the app deletes the store's session, locks, fulfillment plans and fulfillment jobs. Discrepancies are kept until shop data erasure, so a quick reinstall keeps them.
+- **Shop data erasure:** Shopify's `shop/redact` webhook, sent after uninstall, deletes the store's session, locks, fulfillment plans, fulfillment jobs and discrepancies.
 - **Batch records:** these stay in the merchant's store, under the merchant's control.
 - **Webhook IDs:** these are kept for deduplication. They contain no personal data.
 
@@ -45,7 +46,7 @@ Freshness Tracker is a portfolio project, not a commercial product. It is instal
 - **Security:** as described under Security above.
 - **Breaches:** the merchant is notified without undue delay after the developer becomes aware of a breach affecting their data.
 - **Customer requests:** the app stores no customer personal data. It acknowledges Shopify's `customers/data_request` and `customers/redact` webhooks, and on request the developer confirms this to help the merchant answer a customer's access or deletion request.
-- **Termination:** uninstalling the app ends processing and deletes the store's session, locks and fulfillment plans. Discrepancies are deleted on Shopify's `shop/redact` webhook.
+- **Termination:** uninstalling the app ends processing and deletes the store's session, locks, fulfillment plans and fulfillment jobs. Discrepancies are deleted on Shopify's `shop/redact` webhook.
 
 ## Changes
 

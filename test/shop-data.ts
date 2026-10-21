@@ -17,6 +17,15 @@ export async function seedShopData(shop: string) {
   await db.fulfillmentDiscrepancy.create({
     data: { shop, fulfillmentId, productId, reason: "oversell", shortfall: 1 },
   });
+  await db.fulfillmentJob.create({
+    data: {
+      shop,
+      fulfillmentId,
+      products: [],
+      receivedAt: new Date(),
+      nextRunAt: new Date(),
+    },
+  });
 }
 
 export async function clearShopData(shops: string[]) {
@@ -25,6 +34,7 @@ export async function clearShopData(shops: string[]) {
   await db.productLock.deleteMany({ where });
   await db.fulfillmentPlan.deleteMany({ where });
   await db.fulfillmentDiscrepancy.deleteMany({ where });
+  await db.fulfillmentJob.deleteMany({ where });
 }
 
 // Which of the given shops still have rows in each table.
@@ -40,5 +50,6 @@ export async function shopsWithData(shops: string[]) {
     discrepancies: owners(
       await db.fulfillmentDiscrepancy.findMany({ where, select }),
     ),
+    jobs: owners(await db.fulfillmentJob.findMany({ where, select })),
   };
 }
