@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import { formatInventoryMismatch, getInventoryMismatch } from "./inventory";
+import {
+  compareStock,
+  formatInventoryMismatch,
+  formatUnbatchedStock,
+  getInventoryMismatch,
+} from "./inventory";
 import { MAX_QUANTITY } from "./validation";
 
 const tracked = (totalInventory: number) => ({
@@ -71,6 +76,79 @@ describe("getInventoryMismatch", () => {
   });
 });
 
+describe("compareStock", () => {
+  const batches = (...quantities: number[]) =>
+    quantities.map((quantity) => ({ quantity, expirationDate: "2026-11-02" }));
+
+  it("counts units over stock", () => {
+    expect(compareStock(batches(10, 20), tracked(25))).toStrictEqual({
+      batchTotal: 30,
+      uncountedBatches: 0,
+      overStock: 5,
+      unbatchedStock: null,
+    });
+  });
+
+  it("counts stock that isn't in a batch", () => {
+    expect(compareStock(batches(8), tracked(10))).toMatchObject({
+      overStock: null,
+      unbatchedStock: 2,
+    });
+  });
+
+  it("finds nothing to flag when they match", () => {
+    expect(compareStock(batches(10), tracked(10))).toMatchObject({
+      overStock: null,
+      unbatchedStock: null,
+    });
+  });
+
+  // Oversold stock counts as none, so the excess never exceeds the batches
+  it.each([
+    [batches(3), 3],
+    [[], null],
+  ])("treats oversold stock as none (%j)", (list, overStock) => {
+    expect(compareStock(list, tracked(-5)).overStock).toBe(overStock);
+  });
+
+  it("counts invalid quantities separately and doesn't call stock unbatched", () => {
+    expect(compareStock(batches(10, 1.5, 0), tracked(12))).toStrictEqual({
+      batchTotal: 10,
+      uncountedBatches: 2,
+      overStock: null,
+      unbatchedStock: null,
+    });
+  });
+
+  it("still flags over stock when not every batch loaded", () => {
+    expect(compareStock(batches(30), tracked(25), false)).toMatchObject({
+      overStock: 5,
+      unbatchedStock: null,
+    });
+  });
+
+  it("doesn't call stock unbatched when not every batch loaded", () => {
+    expect(
+      compareStock(batches(8), tracked(10), false).unbatchedStock,
+    ).toBeNull();
+  });
+
+  it("doesn't call stock unbatched when the product has no batches", () => {
+    expect(compareStock([], tracked(50)).unbatchedStock).toBeNull();
+  });
+
+  it("flags nothing when inventory isn't tracked", () => {
+    expect(
+      compareStock(batches(30), { tracksInventory: false, totalInventory: 5 }),
+    ).toStrictEqual({
+      batchTotal: 30,
+      uncountedBatches: 0,
+      overStock: null,
+      unbatchedStock: null,
+    });
+  });
+});
+
 describe("formatInventoryMismatch", () => {
   it.each([
     [
@@ -81,5 +159,14 @@ describe("formatInventoryMismatch", () => {
     [{ batchTotal: 5, inStock: 0 }, "Batches total 5, but none are in stock."],
   ])("describes %o", (mismatch, message) => {
     expect(formatInventoryMismatch(mismatch)).toBe(message);
+  });
+});
+
+describe("formatUnbatchedStock", () => {
+  it.each([
+    [1, "1 unit in stock isn't in a batch yet."],
+    [2, "2 units in stock aren't in a batch yet."],
+  ])("describes %i", (units, message) => {
+    expect(formatUnbatchedStock(units)).toBe(message);
   });
 });

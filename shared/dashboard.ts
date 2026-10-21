@@ -5,10 +5,11 @@ import {
   computeBatchFreshness,
   isCalendarDate,
 } from "./freshness";
+import { type ProductInventory, compareStock } from "./inventory";
 import { type BatchNode, isReadableBatch } from "./product-metafields";
 
 // The dashboard query's product shape (see app/routes/app._index.tsx)
-export interface DashboardProductNode {
+export interface DashboardProductNode extends ProductInventory {
   id: string;
   // The numeric id admin URLs take
   legacyResourceId: string;
@@ -36,6 +37,9 @@ export interface DashboardBatch {
 
 export const ADMIN_PRODUCTS = "shopify://admin/products";
 
+// Batches listed per row; totals and status still use every loaded batch
+export const SHOWN_BATCHES = 10;
+
 // A batch in the list didn't resolve, so the row can't show a status
 export const UNREADABLE = "Can't read batches";
 
@@ -48,9 +52,18 @@ export interface DashboardRow {
   earliestExpirationDate: string | null;
   // Worst status among in-stock batches (computeAggregateFreshness)
   status: FreshnessStatus | "Not set" | typeof UNREADABLE;
+  // The first SHOWN_BATCHES; hiddenBatches counts the rest that loaded
   batches: DashboardBatch[];
+  hiddenBatches: number;
   // The query loads a limited number of batches per product
   hasMoreBatches: boolean;
+  // null when Shopify doesn't track the product's inventory
+  stock: number | null;
+  // From compareStock; batchTotal is null when the batches can't be read
+  batchTotal: number | null;
+  uncountedBatches: number;
+  overStock: number | null;
+  unbatchedStock: number | null;
 }
 
 export function toDashboardRows(
@@ -66,9 +79,20 @@ export function toDashboardRows(
       adminUrl: `${ADMIN_PRODUCTS}/${product.legacyResourceId}`,
       imageUrl: product.featuredMedia?.preview?.image?.url ?? null,
       earliestExpirationDate: product.earliestExpiration?.value ?? null,
+      stock: product.tracksInventory ? product.totalInventory : null,
     };
     if (!nodes.every(isReadableBatch)) {
-      return { ...row, status: UNREADABLE, batches: [], hasMoreBatches: false };
+      return {
+        ...row,
+        status: UNREADABLE,
+        batches: [],
+        hiddenBatches: 0,
+        hasMoreBatches: false,
+        batchTotal: null,
+        uncountedBatches: 0,
+        overStock: null,
+        unbatchedStock: null,
+      };
     }
 
     const batches = nodes.map((node) => {
@@ -83,11 +107,14 @@ export function toDashboardRows(
       };
     });
 
+    const hasMoreBatches = references?.pageInfo.hasNextPage ?? false;
     return {
       ...row,
       status: computeAggregateFreshness(batches, today),
-      batches,
-      hasMoreBatches: references?.pageInfo.hasNextPage ?? false,
+      batches: batches.slice(0, SHOWN_BATCHES),
+      hiddenBatches: Math.max(0, batches.length - SHOWN_BATCHES),
+      hasMoreBatches,
+      ...compareStock(batches, product, !hasMoreBatches),
     };
   });
 }

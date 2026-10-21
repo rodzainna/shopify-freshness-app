@@ -10,6 +10,8 @@ import {
 import {
   type ProductInventory,
   formatInventoryMismatch,
+  compareStock,
+  formatUnbatchedStock,
   getInventoryMismatch,
 } from "../../../shared/inventory";
 import { collectErrorMessages } from "../../../shared/graphql-errors";
@@ -471,6 +473,7 @@ function Extension({
   }
 
   const mismatch = getInventoryMismatch(batches, inventory);
+  const unbatched = compareStock(batches, inventory).unbatchedStock;
 
   return (
     <s-admin-block
@@ -488,6 +491,9 @@ function Extension({
             {formatInventoryMismatch(mismatch)} Check the quantities or update
             the product inventory.
           </s-banner>
+        )}
+        {unbatched !== null && (
+          <s-text color="subdued">{formatUnbatchedStock(unbatched)}</s-text>
         )}
         {batches.length > 0 && (
           <s-query-container>

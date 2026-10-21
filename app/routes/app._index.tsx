@@ -16,10 +16,11 @@ import {
   getShopToday,
   isInStock,
 } from "../../shared/freshness";
+import { MAX_BATCHES } from "../../shared/product-metafields";
 
-// One page only in v1; batch counts per product are small
+// One page only in v1. Batches load up to the panel's limit, so totals are
+// complete unless a product has more; at 250 the query requests 269 of 1,000 points.
 const PRODUCT_LIMIT = 50;
-const BATCH_LIMIT = 10;
 
 interface DashboardData {
   shop: { ianaTimezone: string };
@@ -43,6 +44,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             id
             legacyResourceId
             title
+            tracksInventory
+            totalInventory
             featuredMedia {
               preview {
                 image {
@@ -78,7 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
         }
       }`,
-    { variables: { productLimit: PRODUCT_LIMIT, batchLimit: BATCH_LIMIT } },
+    { variables: { productLimit: PRODUCT_LIMIT, batchLimit: MAX_BATCHES } },
   );
   // admin.graphql throws on any GraphQL error, so data is complete here
   const { data } = (await response.json()) as { data: DashboardData };
@@ -115,13 +118,15 @@ export default function Dashboard() {
   }
 
   return (
-    <s-page heading="Freshness overview">
+    <s-page heading="Freshness overview" inlineSize="large">
       <s-section padding="none">
         <s-table>
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
             <s-table-header listSlot="secondary">Status</s-table-header>
             <s-table-header>Earliest expiry</s-table-header>
+            <s-table-header>Stock</s-table-header>
+            <s-table-header>In batches</s-table-header>
             <s-table-header>Batches</s-table-header>
           </s-table-header-row>
           <s-table-body>
@@ -141,6 +146,34 @@ export default function Dashboard() {
                   <s-badge tone={statusTone(row.status)}>{row.status}</s-badge>
                 </s-table-cell>
                 <s-table-cell>{row.earliestExpirationDate ?? "—"}</s-table-cell>
+                <s-table-cell>
+                  {row.stock ?? <s-text color="subdued">Not tracked</s-text>}
+                </s-table-cell>
+                <s-table-cell>
+                  <s-stack
+                    direction="inline"
+                    gap="small-200"
+                    alignItems="center"
+                  >
+                    <s-text>{formatBatchTotal(row)}</s-text>
+                    {row.uncountedBatches > 0 && (
+                      <s-text color="subdued">
+                        ({row.uncountedBatches} not counted)
+                      </s-text>
+                    )}
+                    {row.overStock !== null && (
+                      <s-badge tone="warning">
+                        {row.overStock}
+                        {row.hasMoreBatches && "+"} over
+                      </s-badge>
+                    )}
+                    {row.unbatchedStock !== null && (
+                      <s-badge tone="info">
+                        {row.unbatchedStock} unbatched
+                      </s-badge>
+                    )}
+                  </s-stack>
+                </s-table-cell>
                 <s-table-cell>
                   <s-stack gap="small-200">
                     {row.status === UNREADABLE && (
@@ -173,9 +206,9 @@ export default function Dashboard() {
                         )}
                       </s-stack>
                     ))}
-                    {row.hasMoreBatches && (
+                    {row.hiddenBatches > 0 && (
                       <s-text color="subdued">
-                        Showing the first {BATCH_LIMIT} batches
+                        {formatHiddenBatches(row)}
                       </s-text>
                     )}
                   </s-stack>
@@ -193,6 +226,18 @@ export default function Dashboard() {
       <PrivacyLink />
     </s-page>
   );
+}
+
+// Units, e.g. "4120+" when some batches didn't load and the total is a lower bound
+function formatBatchTotal({ batchTotal, hasMoreBatches }: DashboardRow) {
+  if (batchTotal === null) return "—";
+  return hasMoreBatches ? `${batchTotal}+` : String(batchTotal);
+}
+
+// "1 more batch", or "240+ more batches" when some didn't load
+function formatHiddenBatches({ hiddenBatches, hasMoreBatches }: DashboardRow) {
+  if (hasMoreBatches) return `${hiddenBatches}+ more batches`;
+  return `${hiddenBatches} more ${hiddenBatches === 1 ? "batch" : "batches"}`;
 }
 
 function statusTone(status: DashboardRow["status"]) {
