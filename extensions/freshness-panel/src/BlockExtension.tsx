@@ -18,6 +18,7 @@ import {
   SAVE_PRODUCT_FRESHNESS_MUTATION,
   type SaveProductFreshnessData,
   type UserErrorsPayload,
+  isReadableBatch,
   saveProductFreshnessVariables,
 } from "../../../shared/product-metafields";
 import { applySavedIds, failedItems } from "../../../shared/settled";
@@ -32,7 +33,8 @@ import { useRef, useState } from "preact/hooks";
 interface PanelProduct extends ProductInventory {
   freshnessBatches: {
     references: {
-      nodes: FreshnessBatchNode[];
+      // null for a batch that no longer resolves
+      nodes: (FreshnessBatchNode | null)[];
       pageInfo: { hasNextPage: boolean };
     };
   } | null;
@@ -46,6 +48,7 @@ interface PanelData {
 interface LoadedPanelData {
   shop: PanelData["shop"];
   product: PanelProduct;
+  batches: PanelBatch[];
 }
 
 export default async () => {
@@ -75,15 +78,11 @@ async function mountPanel(productId: string) {
     return;
   }
 
-  // No metafield yet (product never saved) -> start with an empty list
-  const savedBatches =
-    data.product.freshnessBatches?.references.nodes.map(toPanelBatch) ?? [];
-
   render(
     <Extension
       productId={productId}
       timezone={data.shop.ianaTimezone}
-      initialBatches={savedBatches}
+      initialBatches={data.batches}
       inventory={data.product}
     />,
     document.body,
@@ -141,7 +140,19 @@ async function loadPanelData(productId: string): Promise<LoadedPanelData> {
     );
   }
 
-  return { shop: data.shop, product: data.product };
+  // No metafield yet (product never saved) -> start with an empty list
+  const nodes = data.product.freshnessBatches?.references.nodes ?? [];
+  if (!nodes.every(isReadableBatch)) {
+    throw new Error(
+      "Some batches couldn't be read, so editing is turned off to keep them linked. Try again later.",
+    );
+  }
+
+  return {
+    shop: data.shop,
+    product: data.product,
+    batches: nodes.map(toPanelBatch),
+  };
 }
 
 interface PanelBatch {
