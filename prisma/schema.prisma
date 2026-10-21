@@ -55,6 +55,7 @@ enum DiscrepancyReason {
   product_not_found
   too_many_batches
   changed_during_retry
+  apply_failed
 }
 
 // A fulfillment's target batch state for one product, saved before any Shopify

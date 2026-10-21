@@ -224,6 +224,79 @@ describe("processFulfillment", () => {
     ]);
   });
 
+  it("records a fulfillment Shopify rejects and carries on with the next product", async () => {
+    const { shopify, fulfill } = setup();
+    const OTHER = "gid://shopify/Metaobject/other";
+    shopify.addProduct(otherProductId, {
+      [OTHER]: { quantity: 4, expirationDate: "2026-11-01" },
+    });
+    shopify.rejectNext("SetBatchQuantity");
+
+    await processFulfillment(
+      {
+        admin: shopify.admin,
+        shop,
+        fulfillmentId: "gid://shopify/Fulfillment/1",
+        today,
+      },
+      [
+        { productId, quantity: 5 },
+        { productId: otherProductId, quantity: 1 },
+      ],
+    );
+
+    expect(shopify.batch(OTHER)?.quantity).toBe(3);
+    expect(await db.fulfillmentPlan.count({ where: { shop, productId } })).toBe(
+      0,
+    );
+    expect(await discrepancies()).toStrictEqual([
+      {
+        fulfillmentId: "gid://shopify/Fulfillment/1",
+        reason: "apply_failed",
+        shortfall: null,
+      },
+    ]);
+
+    // A redelivery doesn't plan the recorded product again
+    await fulfill("gid://shopify/Fulfillment/1", 5);
+    expect(shopify.batch(LATER)?.quantity).toBe(10);
+  });
+
+  it("drops an earlier plan Shopify now rejects, so later fulfillments go ahead", async () => {
+    const { shopify, fulfill } = setup();
+    // Quantities are written, then the list write fails on the network
+    shopify.failNext("SaveProductFreshness");
+    await expect(fulfill("gid://shopify/Fulfillment/1", 5)).rejects.toThrow();
+    shopify.rejectNext("SetBatchQuantity");
+
+    await fulfill("gid://shopify/Fulfillment/2", 1);
+
+    // The first plan's delete never ran, so the second takes from that batch
+    expect(shopify.batch(SOON)?.quantity).toBe(2);
+    expect(shopify.batch(LATER)?.quantity).toBe(8);
+    expect(
+      (await discrepancies()).map(({ fulfillmentId, reason }) => [
+        fulfillmentId,
+        reason,
+      ]),
+    ).toStrictEqual([["gid://shopify/Fulfillment/1", "apply_failed"]]);
+  });
+
+  it("records a batch list it can't read", async () => {
+    const { shopify, fulfill } = setup();
+    shopify.product(productId)!.batchIds = [
+      SOON,
+      "gid://shopify/Metaobject/gone",
+    ];
+
+    await fulfill("gid://shopify/Fulfillment/1", 2);
+
+    expect(shopify.batch(SOON)?.quantity).toBe(3);
+    expect((await discrepancies()).map(({ reason }) => reason)).toStrictEqual([
+      "apply_failed",
+    ]);
+  });
+
   it("skips a product the app doesn't track", async () => {
     const { shopify, fulfill } = setup();
     shopify.addProduct(otherProductId, null);

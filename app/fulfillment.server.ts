@@ -5,7 +5,11 @@ import type {
   Prisma,
 } from "@prisma/client";
 import db from "./db.server";
-import { applyPlan, readProductBatches } from "./fulfillment-shopify.server";
+import {
+  PermanentShopifyError,
+  applyPlan,
+  readProductBatches,
+} from "./fulfillment-shopify.server";
 import { withProductLock } from "./product-lock.server";
 import type { ProductQuantity } from "../shared/fulfillment";
 import {
@@ -30,6 +34,7 @@ const STOPPING_REASONS: DiscrepancyReason[] = [
   "product_not_found",
   "too_many_batches",
   "changed_during_retry",
+  "apply_failed",
 ];
 
 /**
@@ -53,13 +58,24 @@ async function processProduct(
   productId: string,
   quantity: number,
 ): Promise<void> {
-  const { admin, shop, fulfillmentId, today } = context;
-  const key: PlanKey = { shop, fulfillmentId, productId };
+  const key: PlanKey = {
+    shop: context.shop,
+    fulfillmentId: context.fulfillmentId,
+    productId,
+  };
 
   // Earlier fulfillments' plans go first, so plans apply in order
   await finishPendingPlans(context, productId);
   if (await alreadyHandled(key)) return;
+  await recordIfRejected(key, () => planAndApply(context, key, quantity));
+}
 
+async function planAndApply(
+  { admin, today }: FulfillmentContext,
+  key: PlanKey,
+  quantity: number,
+): Promise<void> {
+  const { fulfillmentId, productId } = key;
   const read = await readProductBatches(admin, productId);
   if ("notTracked" in read) return;
   if ("problem" in read) {
@@ -104,7 +120,9 @@ async function finishPendingPlans(
     where: { shop: context.shop, productId, appliedAt: null },
     orderBy: { createdAt: "asc" },
   });
-  for (const row of pending) await finishPlan(context, row);
+  for (const row of pending) {
+    await recordIfRejected(row, () => finishPlan(context, row));
+  }
 }
 
 async function finishPlan(
@@ -134,18 +152,37 @@ async function finishPlan(
   await markApplied(row);
 }
 
+// A rejection would recur on every retry and block this product's later
+// fulfillments, so it's recorded and processing moves on.
+async function recordIfRejected(
+  key: PlanKey,
+  work: () => Promise<void>,
+): Promise<void> {
+  try {
+    await work();
+  } catch (error) {
+    if (!(error instanceof PermanentShopifyError)) throw error;
+    await dropPlan(key, "apply_failed", error.message);
+  }
+}
+
 // The discrepancy replaces the plan as the record, so the fulfillment is never
 // recalculated against stock that has changed since.
 async function dropPlan(
   { shop, fulfillmentId, productId }: PlanKey,
   reason: DiscrepancyReason,
+  detail?: string,
 ): Promise<void> {
   const key = { shop, fulfillmentId, productId };
+  // deleteMany: a read can fail before the plan is saved
   await db.$transaction([
     upsertDiscrepancy(key, reason),
-    db.fulfillmentPlan.delete({ where: { shop_fulfillmentId_productId: key } }),
+    db.fulfillmentPlan.deleteMany({ where: key }),
   ]);
-  console.warn(`Dropped ${fulfillmentId}'s plan for ${productId}: ${reason}`);
+  console.warn(
+    `Dropped ${fulfillmentId}'s plan for ${productId}: ${reason}`,
+    ...(detail ? [detail] : []),
+  );
 }
 
 async function recordStop(

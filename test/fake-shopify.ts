@@ -23,6 +23,13 @@ export function fakeShopify() {
   const calls: string[] = [];
   // Operation name → how many more calls should fail before succeeding
   const failures = new Map<string, number>();
+  // Operation name → how many more calls Shopify should reject
+  const rejections = new Map<string, number>();
+  const payloadField: Record<string, string> = {
+    SetBatchQuantity: "metaobjectUpdate",
+    SaveProductFreshness: "metafieldsSet",
+    DeleteBatch: "metaobjectDelete",
+  };
 
   const userError = (message: string, code: string) => ({
     userErrors: [{ field: ["id"], message, code }],
@@ -39,11 +46,16 @@ export function fakeShopify() {
         product: {
           freshnessBatches: {
             references: {
-              nodes: product.batchIds.map((id) => ({
-                id,
-                quantity: { value: String(batches.get(id)!.quantity) },
-                expirationDate: { value: batches.get(id)!.expirationDate },
-              })),
+              // A batch that isn't stored comes back without an id
+              nodes: product.batchIds.map((id) => {
+                const batch = batches.get(id);
+                if (!batch) return {};
+                return {
+                  id,
+                  quantity: { value: String(batch.quantity) },
+                  expirationDate: { value: batch.expirationDate },
+                };
+              }),
               pageInfo: { hasNextPage: false },
             },
           },
@@ -98,6 +110,15 @@ export function fakeShopify() {
         failures.set(operation, remaining - 1);
         throw new Error(`Simulated network failure in ${operation}`);
       }
+      const rejectionsLeft = rejections.get(operation) ?? 0;
+      if (rejectionsLeft > 0) {
+        rejections.set(operation, rejectionsLeft - 1);
+        return Response.json({
+          data: {
+            [payloadField[operation]]: userError("Invalid value", "INVALID"),
+          },
+        });
+      }
       return Response.json({
         data: answer[operation](options?.variables ?? {}),
       });
@@ -123,6 +144,9 @@ export function fakeShopify() {
     },
     failNext(operation: string, times = 1) {
       failures.set(operation, times);
+    },
+    rejectNext(operation: string, times = 1) {
+      rejections.set(operation, times);
     },
     product: (productId: string) => products.get(productId),
     batch: (id: string) => batches.get(id),

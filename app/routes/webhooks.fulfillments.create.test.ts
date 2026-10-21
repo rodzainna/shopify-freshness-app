@@ -118,6 +118,15 @@ describe("fulfillments/create webhook", () => {
     expect(await processed()).toBeNull();
   });
 
+  it("acknowledges a webhook whose writes Shopify rejects", async () => {
+    const shopify = shopWithBatch();
+    shopify.rejectNext("SetBatchQuantity");
+
+    expect((await deliver(shopify.admin)).status).toBe(200);
+    expect(shopify.batch(batchId)?.quantity).toBe(5);
+    expect(await processed()).not.toBeNull();
+  });
+
   it("leaves the webhook unprocessed when a write fails, so Shopify retries", async () => {
     const shopify = shopWithBatch();
     shopify.failNext("SetBatchQuantity");
