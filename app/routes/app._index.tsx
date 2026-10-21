@@ -18,7 +18,8 @@ import {
 } from "../../shared/freshness";
 import { MAX_BATCHES } from "../../shared/product-metafields";
 
-// One page only in v1. Batches load up to the panel's limit, so totals are complete.
+// One page only in v1. Batches load up to the panel's limit, so totals are
+// complete unless a product has more; at 250 the query requests 269 of 1,000 points.
 const PRODUCT_LIMIT = 50;
 
 interface DashboardData {
@@ -155,11 +156,15 @@ export default function Dashboard() {
                     alignItems="center"
                   >
                     <s-text>{formatBatchTotal(row)}</s-text>
-                    {row.inventoryMismatch && (
+                    {row.uncountedBatches > 0 && (
+                      <s-text color="subdued">
+                        ({row.uncountedBatches} not counted)
+                      </s-text>
+                    )}
+                    {row.overStock !== null && (
                       <s-badge tone="warning">
-                        {row.inventoryMismatch.batchTotal -
-                          row.inventoryMismatch.inStock}{" "}
-                        over stock
+                        {row.overStock}
+                        {row.hasMoreBatches && "+"} over stock
                       </s-badge>
                     )}
                   </s-stack>
@@ -196,9 +201,10 @@ export default function Dashboard() {
                         )}
                       </s-stack>
                     ))}
-                    {row.hasMoreBatches && (
+                    {row.hiddenBatches > 0 && (
                       <s-text color="subdued">
-                        Showing the first {MAX_BATCHES} batches
+                        +{row.hiddenBatches}
+                        {row.hasMoreBatches && "+"} more batches
                       </s-text>
                     )}
                   </s-stack>
@@ -218,7 +224,7 @@ export default function Dashboard() {
   );
 }
 
-// "250+" when some batches didn't load, so the total is a lower bound
+// Units, e.g. "4120+" when some batches didn't load and the total is a lower bound
 function formatBatchTotal({ batchTotal, hasMoreBatches }: DashboardRow) {
   if (batchTotal === null) return "—";
   return hasMoreBatches ? `${batchTotal}+` : String(batchTotal);

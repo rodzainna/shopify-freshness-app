@@ -6,12 +6,12 @@ import {
   isCalendarDate,
 } from "./freshness";
 import {
-  type InventoryMismatch,
   type ProductInventory,
-  getInventoryMismatch,
+  exceedsStock,
   totalBatchQuantity,
 } from "./inventory";
 import { type BatchNode, isReadableBatch } from "./product-metafields";
+import { validateBatch } from "./validation";
 
 // The dashboard query's product shape (see app/routes/app._index.tsx)
 export interface DashboardProductNode extends ProductInventory {
@@ -42,6 +42,9 @@ export interface DashboardBatch {
 
 export const ADMIN_PRODUCTS = "shopify://admin/products";
 
+// Batches listed per row; totals and status still use every loaded batch
+export const SHOWN_BATCHES = 10;
+
 // A batch in the list didn't resolve, so the row can't show a status
 export const UNREADABLE = "Can't read batches";
 
@@ -54,15 +57,19 @@ export interface DashboardRow {
   earliestExpirationDate: string | null;
   // Worst status among in-stock batches (computeAggregateFreshness)
   status: FreshnessStatus | "Not set" | typeof UNREADABLE;
+  // The first SHOWN_BATCHES; hiddenBatches counts the rest that loaded
   batches: DashboardBatch[];
+  hiddenBatches: number;
   // The query loads a limited number of batches per product
   hasMoreBatches: boolean;
   // null when Shopify doesn't track the product's inventory
   stock: number | null;
-  // null when the batches can't be read
+  // Units across loaded batches; null when the batches can't be read
   batchTotal: number | null;
-  // Batches total more than is in stock; not checked when some didn't load
-  inventoryMismatch: InventoryMismatch | null;
+  // Batches with an invalid quantity, left out of batchTotal
+  uncountedBatches: number;
+  // Units over the stock shown, when exceedsStock; a lower bound if some didn't load
+  overStock: number | null;
 }
 
 export function toDashboardRows(
@@ -85,9 +92,11 @@ export function toDashboardRows(
         ...row,
         status: UNREADABLE,
         batches: [],
+        hiddenBatches: 0,
         hasMoreBatches: false,
         batchTotal: null,
-        inventoryMismatch: null,
+        uncountedBatches: 0,
+        overStock: null,
       };
     }
 
@@ -103,16 +112,20 @@ export function toDashboardRows(
       };
     });
 
-    const hasMoreBatches = references?.pageInfo.hasNextPage ?? false;
+    // Loaded batches are a lower bound, so a total already over stock is certain
+    const batchTotal = totalBatchQuantity(batches);
     return {
       ...row,
       status: computeAggregateFreshness(batches, today),
-      batches,
-      hasMoreBatches,
-      batchTotal: totalBatchQuantity(batches),
-      inventoryMismatch: hasMoreBatches
-        ? null
-        : getInventoryMismatch(batches, product),
+      batches: batches.slice(0, SHOWN_BATCHES),
+      hiddenBatches: Math.max(0, batches.length - SHOWN_BATCHES),
+      hasMoreBatches: references?.pageInfo.hasNextPage ?? false,
+      batchTotal,
+      uncountedBatches: batches.filter((batch) => validateBatch(batch).quantity)
+        .length,
+      overStock: exceedsStock(batchTotal, product)
+        ? batchTotal - product.totalInventory
+        : null,
     };
   });
 }

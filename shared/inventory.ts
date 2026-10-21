@@ -18,6 +18,17 @@ export function totalBatchQuantity(batches: Batch[]): number {
     .reduce((total, batch) => total + batch.quantity, 0);
 }
 
+// Oversold products report negative stock; treat that as none
+export function exceedsStock(
+  batchTotal: number,
+  inventory: ProductInventory,
+): boolean {
+  return (
+    inventory.tracksInventory &&
+    batchTotal > Math.max(0, inventory.totalInventory)
+  );
+}
+
 /**
  * Batches are entered by hand, so they can drift from Shopify's stock count.
  *
@@ -28,13 +39,9 @@ export function getInventoryMismatch(
   batches: Batch[],
   inventory: ProductInventory,
 ): InventoryMismatch | null {
-  if (!inventory.tracksInventory) return null;
-
   const batchTotal = totalBatchQuantity(batches);
-  // Oversold products report negative stock; treat that as none
-  const inStock = Math.max(0, inventory.totalInventory);
-
-  return batchTotal > inStock ? { batchTotal, inStock } : null;
+  if (!exceedsStock(batchTotal, inventory)) return null;
+  return { batchTotal, inStock: Math.max(0, inventory.totalInventory) };
 }
 
 export function formatInventoryMismatch({

@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 
-import { formatInventoryMismatch, getInventoryMismatch } from "./inventory";
+import {
+  exceedsStock,
+  formatInventoryMismatch,
+  getInventoryMismatch,
+} from "./inventory";
 import { MAX_QUANTITY } from "./validation";
 
 const tracked = (totalInventory: number) => ({
@@ -68,6 +72,24 @@ describe("getInventoryMismatch", () => {
 
   it("is null when there are no batches", () => {
     expect(getInventoryMismatch([], tracked(0))).toBeNull();
+  });
+});
+
+describe("exceedsStock", () => {
+  const tracked = (totalInventory: number) => ({
+    tracksInventory: true,
+    totalInventory,
+  });
+
+  it.each([
+    [31, tracked(30), true],
+    [30, tracked(30), false],
+    [1, tracked(-5), true],
+    // Oversold stock counts as none, so no batches isn't over it
+    [0, tracked(-5), false],
+    [99, { tracksInventory: false, totalInventory: 0 }, false],
+  ])("%i units against %o is %s", (batchTotal, inventory, expected) => {
+    expect(exceedsStock(batchTotal, inventory)).toBe(expected);
   });
 });
 

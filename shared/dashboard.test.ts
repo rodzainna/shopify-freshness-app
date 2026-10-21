@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 
 import {
   type DashboardProductNode,
+  SHOWN_BATCHES,
   UNREADABLE,
   toDashboardRows,
 } from "./dashboard";
+import type { ProductInventory } from "./inventory";
 
 const TODAY = "2026-10-19";
 
@@ -73,10 +75,12 @@ describe("toDashboardRows", () => {
           freshness: { status: "Fresh", daysRemaining: 32 },
         },
       ],
+      hiddenBatches: 0,
       hasMoreBatches: false,
       stock: null,
       batchTotal: 13,
-      inventoryMismatch: null,
+      uncountedBatches: 0,
+      overStock: null,
     });
   });
 
@@ -90,10 +94,12 @@ describe("toDashboardRows", () => {
         earliestExpirationDate: null,
         status: "Not set",
         batches: [],
+        hiddenBatches: 0,
         hasMoreBatches: false,
         stock: null,
         batchTotal: 0,
-        inventoryMismatch: null,
+        uncountedBatches: 0,
+        overStock: null,
       },
     ]);
   });
@@ -149,10 +155,12 @@ describe("toDashboardRows", () => {
         earliestExpirationDate: "2026-10-10",
         status: UNREADABLE,
         batches: [],
+        hiddenBatches: 0,
         hasMoreBatches: false,
         stock: null,
         batchTotal: null,
-        inventoryMismatch: null,
+        uncountedBatches: 0,
+        overStock: null,
       },
       expect.objectContaining({
         id: "gid://shopify/Product/2",
@@ -310,7 +318,7 @@ describe("toDashboardRows", () => {
 
   describe("stock and batch total", () => {
     // Batches of 10 and 20 units
-    const milk = (inventory: object, hasNextPage = false) =>
+    const milk = (inventory: Partial<ProductInventory>, hasNextPage = false) =>
       product({
         ...inventory,
         freshnessBatches: {
@@ -330,11 +338,7 @@ describe("toDashboardRows", () => {
         TODAY,
       );
 
-      expect(row).toMatchObject({
-        stock: 25,
-        batchTotal: 30,
-        inventoryMismatch: { batchTotal: 30, inStock: 25 },
-      });
+      expect(row).toMatchObject({ stock: 25, batchTotal: 30, overStock: 5 });
     });
 
     it("doesn't flag batches that fit the stock", () => {
@@ -343,7 +347,7 @@ describe("toDashboardRows", () => {
         TODAY,
       );
 
-      expect(row).toMatchObject({ stock: 30, inventoryMismatch: null });
+      expect(row).toMatchObject({ stock: 30, overStock: null });
     });
 
     it("shows no stock and no flag when inventory isn't tracked", () => {
@@ -355,17 +359,79 @@ describe("toDashboardRows", () => {
       expect(row).toMatchObject({
         stock: null,
         batchTotal: 30,
-        inventoryMismatch: null,
+        overStock: null,
       });
     });
 
-    it("doesn't flag when some batches didn't load", () => {
+    it("counts the excess from the stock shown when it's oversold", () => {
+      const [row] = toDashboardRows(
+        [milk({ tracksInventory: true, totalInventory: -5 })],
+        TODAY,
+      );
+
+      expect(row).toMatchObject({ stock: -5, overStock: 35 });
+    });
+
+    // The loaded batches are a lower bound on the real total
+    it("flags batches that didn't all load once they're already over stock", () => {
       const [row] = toDashboardRows(
         [milk({ tracksInventory: true, totalInventory: 25 }, true)],
         TODAY,
       );
 
-      expect(row).toMatchObject({ batchTotal: 30, inventoryMismatch: null });
+      expect(row).toMatchObject({ hasMoreBatches: true, overStock: 5 });
+    });
+
+    it("doesn't flag batches that didn't all load while they're under stock", () => {
+      const [row] = toDashboardRows(
+        [milk({ tracksInventory: true, totalInventory: 40 }, true)],
+        TODAY,
+      );
+
+      expect(row).toMatchObject({ hasMoreBatches: true, overStock: null });
+    });
+
+    it("counts batches with an invalid quantity separately", () => {
+      const [row] = toDashboardRows(
+        [
+          product({
+            freshnessBatches: {
+              references: {
+                nodes: [
+                  batch("gid://shopify/Metaobject/1", "10", "2026-11-02"),
+                  batch("gid://shopify/Metaobject/2", "1.5", "2026-11-02"),
+                ],
+                pageInfo: { hasNextPage: false },
+              },
+            },
+          }),
+        ],
+        TODAY,
+      );
+
+      expect(row).toMatchObject({ batchTotal: 10, uncountedBatches: 1 });
+    });
+  });
+
+  it("lists the first batches and counts the rest", () => {
+    const nodes = Array.from({ length: SHOWN_BATCHES + 3 }, (_, i) =>
+      batch(`gid://shopify/Metaobject/${i}`, "1", "2026-11-02"),
+    );
+    const [row] = toDashboardRows(
+      [
+        product({
+          freshnessBatches: {
+            references: { nodes, pageInfo: { hasNextPage: false } },
+          },
+        }),
+      ],
+      TODAY,
+    );
+
+    expect(row.batches).toHaveLength(SHOWN_BATCHES);
+    expect(row).toMatchObject({
+      hiddenBatches: 3,
+      batchTotal: SHOWN_BATCHES + 3,
     });
   });
 
