@@ -3,7 +3,7 @@ import db from "../db.server";
 import {
   authenticateWebhookSafely,
   isDuplicateWebhook,
-  markWebhookProcessed,
+  processedWebhookQuery,
 } from "../webhooks.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -19,15 +19,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   console.log(`Received ${topic} webhook for ${shop}`);
 
   // Discrepancies are kept until shop/redact, so a quick reinstall keeps them.
+  // Marked in the same transaction, so a retry after a reinstall can't delete the new session.
   const where = { shop };
   await db.$transaction([
     db.session.deleteMany({ where }),
     db.productLock.deleteMany({ where }),
     db.fulfillmentPlan.deleteMany({ where }),
     db.fulfillmentJob.deleteMany({ where }),
+    processedWebhookQuery(webhookId, topic),
   ]);
-
-  await markWebhookProcessed(webhookId, topic);
 
   return new Response();
 };
