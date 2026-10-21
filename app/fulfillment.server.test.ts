@@ -20,8 +20,8 @@ async function clearTestData() {
   await db.productLock.deleteMany({ where });
 }
 
-function setup({ delayMs = 0 } = {}) {
-  const shopify = fakeShopify({ delayMs });
+function setup(options?: Parameters<typeof fakeShopify>[0]) {
+  const shopify = fakeShopify(options);
   shopify.addProduct(productId, {
     [SOON]: { quantity: 3, expirationDate: "2026-10-22" },
     [LATER]: { quantity: 10, expirationDate: "2026-11-05" },
