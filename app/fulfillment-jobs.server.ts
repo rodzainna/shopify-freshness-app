@@ -8,6 +8,11 @@ import type { ProductQuantity } from "../shared/fulfillment";
 
 type JobKey = Pick<FulfillmentJob, "shop" | "fulfillmentId">;
 
+declare global {
+  // eslint-disable-next-line no-var
+  var fulfillmentJobSweep: ReturnType<typeof setInterval> | undefined;
+}
+
 // Retries after the first attempt, about 4 hours in all, like Shopify's own
 const RETRY_DELAYS_MS = [
   30_000, 60_000, 120_000, 300_000, 900_000, 1_800_000, 3_600_000, 7_200_000,
@@ -15,6 +20,21 @@ const RETRY_DELAYS_MS = [
 
 // A run that has held a job this long is assumed to have crashed
 export const STALE_RUN_MS = 5 * 60_000;
+
+const SWEEP_INTERVAL_MS = 30_000;
+
+// Pending and due, or held by a run that has likely crashed
+function runnable(now: Date): Prisma.FulfillmentJobWhereInput {
+  return {
+    OR: [
+      { status: "pending", nextRunAt: { lte: now } },
+      {
+        status: "running",
+        claimedAt: { lte: new Date(now.getTime() - STALE_RUN_MS) },
+      },
+    ],
+  };
+}
 
 /** Saves a received fulfillment to apply later. A repeat delivery is a no-op. */
 export function saveFulfillmentJob({
@@ -74,16 +94,7 @@ async function claimJob(
   now: Date,
 ): Promise<FulfillmentJob | null> {
   const { count } = await db.fulfillmentJob.updateMany({
-    where: {
-      ...key,
-      OR: [
-        { status: "pending", nextRunAt: { lte: now } },
-        {
-          status: "running",
-          claimedAt: { lte: new Date(now.getTime() - STALE_RUN_MS) },
-        },
-      ],
-    },
+    where: { ...key, ...runnable(now) },
     data: { status: "running", claimedAt: now, attempts: { increment: 1 } },
   });
   if (count === 0) return null;
@@ -125,4 +136,39 @@ async function recordFailure(
   console.warn(
     `Retrying ${job.fulfillmentId} for ${job.shop} in ${delay / 1000}s: ${lastError}`,
   );
+}
+
+/** Runs every job that's due, oldest first. Returns how many it tried. */
+export async function runDueJobs(now: Date = new Date()): Promise<number> {
+  const due = await db.fulfillmentJob.findMany({
+    where: runnable(now),
+    select: { shop: true, fulfillmentId: true },
+    orderBy: { receivedAt: "asc" },
+  });
+  for (const key of due) await runFulfillmentJob(key, now);
+  return due.length;
+}
+
+/**
+ * Sweeps for due jobs every 30s. Calling it again replaces the
+ * timer, so a dev reload runs the new code instead of adding a second sweep.
+ */
+export function startJobSweep(): void {
+  clearInterval(global.fulfillmentJobSweep);
+  let sweeping = false;
+  const sweep = async () => {
+    // Skip a tick while a long sweep is still running
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      await runDueJobs();
+    } catch (error) {
+      console.error("Fulfillment job sweep failed", error);
+    } finally {
+      sweeping = false;
+    }
+  };
+  global.fulfillmentJobSweep = setInterval(sweep, SWEEP_INTERVAL_MS);
+  // Don't keep the process alive just for the sweep
+  global.fulfillmentJobSweep.unref();
 }

@@ -3,8 +3,10 @@ import { SessionNotFoundError } from "@shopify/shopify-app-react-router/server";
 import db from "./db.server";
 import {
   STALE_RUN_MS,
+  runDueJobs,
   runFulfillmentJob,
   saveFulfillmentJob,
+  startJobSweep,
 } from "./fulfillment-jobs.server";
 import { unauthenticated } from "./shopify.server";
 import { fakeShopify } from "../test/fake-shopify";
@@ -198,5 +200,68 @@ describe("runFulfillmentJob", () => {
       attempts: 1,
       lastError: "Could not find a session",
     });
+  });
+});
+
+describe("runDueJobs", () => {
+  it("runs due jobs oldest first, and leaves the rest", async () => {
+    // Dated 2020 so jobs other test files save now aren't due here
+    const shopify = setup();
+    const save = (id: string, receivedAt: Date) =>
+      saveFulfillmentJob({
+        shop,
+        fulfillmentId: `gid://shopify/Fulfillment/${id}`,
+        products: [{ productId, quantity: 1 }],
+        receivedAt,
+      });
+    await save("2", new Date("2020-01-15T10:00:00Z"));
+    await save("1", new Date("2020-01-15T09:00:00Z"));
+    await save("later", new Date("2020-01-15T23:00:00Z"));
+    await save("failed", new Date("2020-01-15T08:00:00Z"));
+    await db.fulfillmentJob.updateMany({
+      where: { shop, fulfillmentId: { endsWith: "/failed" } },
+      data: { status: "failed" },
+    });
+
+    const tried = await runDueJobs(new Date("2020-01-15T12:00:00Z"));
+
+    expect(tried).toBe(2);
+    expect(shopify.batch(BATCH)?.quantity).toBe(3);
+    const plans = await db.fulfillmentPlan.findMany({
+      where: { shop },
+      orderBy: { createdAt: "asc" },
+      select: { fulfillmentId: true },
+    });
+    expect(plans.map(({ fulfillmentId }) => fulfillmentId)).toStrictEqual([
+      "gid://shopify/Fulfillment/1",
+      "gid://shopify/Fulfillment/2",
+    ]);
+    const left = await db.fulfillmentJob.findMany({
+      where: { shop },
+      select: { fulfillmentId: true },
+      orderBy: { fulfillmentId: "asc" },
+    });
+    expect(left.map(({ fulfillmentId }) => fulfillmentId)).toStrictEqual([
+      "gid://shopify/Fulfillment/failed",
+      "gid://shopify/Fulfillment/later",
+    ]);
+  });
+});
+
+describe("startJobSweep", () => {
+  afterEach(() => {
+    clearInterval(global.fulfillmentJobSweep);
+    global.fulfillmentJobSweep = undefined;
+  });
+
+  it("replaces the previous timer instead of adding a second sweep", () => {
+    const clear = vi.spyOn(global, "clearInterval");
+
+    startJobSweep();
+    const first = global.fulfillmentJobSweep;
+    startJobSweep();
+
+    expect(clear).toHaveBeenCalledWith(first);
+    expect(global.fulfillmentJobSweep).not.toBe(first);
   });
 });

@@ -17,8 +17,10 @@ export async function seedShopData(shop: string) {
   await db.fulfillmentDiscrepancy.create({
     data: { shop, fulfillmentId, productId, reason: "oversell", shortfall: 1 },
   });
+  // Failed, so a sweep in a test running alongside never picks it up
   await db.fulfillmentJob.create({
     data: {
+      status: "failed",
       shop,
       fulfillmentId,
       products: [],
