@@ -70,8 +70,20 @@ async function processProduct(
   const { plan, shortfall } = planFulfillment(read.batches, quantity, today);
   await db.$transaction([
     db.fulfillmentPlan.create({ data: { ...key, plan: toJson(plan) } }),
+    // Upsert: an uninstall deletes plans but keeps discrepancies
     ...(shortfall
-      ? [db.fulfillmentDiscrepancy.create({ data: { ...key, ...shortfall } })]
+      ? [
+          db.fulfillmentDiscrepancy.upsert({
+            where: {
+              shop_fulfillmentId_productId_reason: {
+                ...key,
+                reason: shortfall.reason,
+              },
+            },
+            create: { ...key, ...shortfall },
+            update: {},
+          }),
+        ]
       : []),
   ]);
   if (shortfall) {

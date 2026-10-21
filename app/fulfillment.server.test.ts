@@ -180,6 +180,25 @@ describe("processFulfillment", () => {
     ]);
   });
 
+  it("records a shortfall again without failing when its row already exists", async () => {
+    const { fulfill } = setup();
+    // Left by an earlier attempt whose plan an uninstall deleted
+    await db.fulfillmentDiscrepancy.create({
+      data: {
+        shop,
+        fulfillmentId: "gid://shopify/Fulfillment/1",
+        productId,
+        reason: "oversell",
+        shortfall: 2,
+        expiredUnits: 0,
+      },
+    });
+
+    await fulfill("gid://shopify/Fulfillment/1", 15);
+
+    expect(await discrepancies()).toHaveLength(1);
+  });
+
   it("keeps both a shortfall and a later retry conflict", async () => {
     const { shopify, fulfill } = setup();
     const FRESH = "gid://shopify/Metaobject/fresh";
