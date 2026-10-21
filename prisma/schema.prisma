@@ -55,6 +55,7 @@ enum DiscrepancyReason {
   product_not_found
   too_many_batches
   changed_during_retry
+  apply_failed
 }
 
 // A fulfillment's target batch state for one product, saved before any Shopify
@@ -81,6 +82,7 @@ model FulfillmentDiscrepancy {
   expiredUnits  Int?
   createdAt     DateTime          @default(now())
 
-  @@id([shop, fulfillmentId, productId])
+  // One row per reason: a shortfall and a later retry conflict can both apply
+  @@id([shop, fulfillmentId, productId, reason])
   @@index([shop, createdAt])
 }

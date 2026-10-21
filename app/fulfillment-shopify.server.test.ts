@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import {
+  PermanentShopifyError,
   applyPlan,
   readProductBatches,
   readShopToday,
@@ -135,7 +136,9 @@ describe("readProductBatches", () => {
     });
 
     await expect(readProductBatches(admin, productId)).rejects.toThrow(
-      `Product ${productId} has a batch list the app can't read`,
+      new PermanentShopifyError(
+        `Product ${productId} has a batch list the app can't read`,
+      ),
     );
   });
 
@@ -147,7 +150,9 @@ describe("readProductBatches", () => {
     });
 
     await expect(readProductBatches(admin, productId)).rejects.toThrow(
-      `Product ${productId} has a batch list the app can't read`,
+      new PermanentShopifyError(
+        `Product ${productId} has a batch list the app can't read`,
+      ),
     );
   });
 
@@ -377,8 +382,36 @@ describe("applyPlan", () => {
     });
 
     await expect(applyPlan(admin, productId, plan, null)).rejects.toThrow(
-      `Saving product ${productId} freshness failed: Invalid value`,
+      new PermanentShopifyError(
+        `Saving product ${productId} freshness failed: Invalid value`,
+      ),
     );
+  });
+
+  it("keeps a network failure retryable alongside a rejection", async () => {
+    const { admin } = fakeAdmin({
+      ...writesSucceed,
+      SetBatchQuantity: ({ id }: { id: string }) => {
+        if (id === "gid://shopify/Metaobject/2") throw new Error("Timed out");
+        return {
+          metaobjectUpdate: { userErrors: [{ message: "Invalid value" }] },
+        };
+      },
+    });
+    const twoUpdates: FulfillmentPlanData = {
+      ...plan,
+      updates: [
+        { id: "gid://shopify/Metaobject/2", before: 10, after: 8 },
+        { id: "gid://shopify/Metaobject/3", before: 4, after: 1 },
+      ],
+    };
+
+    const error = await applyPlan(admin, productId, twoUpdates, null).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(PermanentShopifyError);
   });
 
   it("treats a batch that's already deleted as done", async () => {

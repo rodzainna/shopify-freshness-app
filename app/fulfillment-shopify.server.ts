@@ -13,6 +13,11 @@ import {
   saveProductFreshnessVariables,
 } from "../shared/product-metafields";
 
+// Shopify rejected the data itself, so retrying the same writes can't succeed
+export class PermanentShopifyError extends Error {
+  name = "PermanentShopifyError";
+}
+
 // admin.graphql throws on top-level GraphQL errors, so only userErrors
 // need checking here.
 async function query<T>(
@@ -99,7 +104,9 @@ export async function readProductBatches(
   const { references } = product.freshnessBatches;
   // Writing back a list we couldn't fully read would unlink batches, so stop
   if (!references || references.nodes.some((node) => !node.id)) {
-    throw new Error(`Product ${productId} has a batch list the app can't read`);
+    throw new PermanentShopifyError(
+      `Product ${productId} has a batch list the app can't read`,
+    );
   }
   if (references.pageInfo.hasNextPage) return { problem: "too_many_batches" };
 
@@ -170,7 +177,12 @@ async function writeEach<T>(
     const messages = errors.map((error) =>
       error instanceof Error ? error.message : String(error),
     );
-    throw new Error(messages.join("; "));
+    // Any temporary failure keeps the whole step retryable
+    const permanent = errors.every(
+      (error) => error instanceof PermanentShopifyError,
+    );
+    const Combined = permanent ? PermanentShopifyError : Error;
+    throw new Combined(messages.join("; "));
   }
 }
 
@@ -235,6 +247,6 @@ function throwOnUserErrors(
 ): void {
   const messages = collectErrorMessages(undefined, ...userErrors);
   if (messages.length > 0) {
-    throw new Error(`${action} failed: ${messages.join("; ")}`);
+    throw new PermanentShopifyError(`${action} failed: ${messages.join("; ")}`);
   }
 }

@@ -29,6 +29,14 @@ describe("webhook dedup", () => {
     await markWebhookProcessed(testWebhookId, "app/uninstalled");
     expect(await isDuplicateWebhook(testWebhookId)).toBe(true);
   });
+
+  it("marks a webhook that an overlapping retry already marked", async () => {
+    await markWebhookProcessed(testWebhookId, "app/uninstalled");
+
+    await expect(
+      markWebhookProcessed(testWebhookId, "app/uninstalled"),
+    ).resolves.toBeUndefined();
+  });
 });
 
 describe("authenticateWebhookSafely", () => {

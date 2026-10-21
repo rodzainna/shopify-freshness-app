@@ -12,8 +12,11 @@ export async function markWebhookProcessed(
   webhookId: string,
   topic: string,
 ): Promise<void> {
-  await db.processedWebhook.create({
-    data: { id: webhookId, topic },
+  // Upsert: an overlapping retry of the same webhook may have marked it first
+  await db.processedWebhook.upsert({
+    where: { id: webhookId },
+    create: { id: webhookId, topic },
+    update: {},
   });
 }
 
