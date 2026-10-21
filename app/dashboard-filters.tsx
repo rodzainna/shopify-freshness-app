@@ -9,10 +9,20 @@ import {
 import {
   type DashboardFilters,
   FILTER_PARAMS,
+  STATUS_FILTERS,
+  STOCK_FILTERS,
 } from "../shared/dashboard-filters";
 import type { FilterOptions } from "./routes/app.filter-options";
 
 const SEARCH_DELAY_MS = 300;
+
+interface Option {
+  value: string;
+  label: string;
+}
+
+const STATUS_OPTIONS = toOptions(STATUS_FILTERS);
+const STOCK_OPTIONS = toOptions(STOCK_FILTERS);
 
 type UpdateParams = (params: URLSearchParams) => void;
 
@@ -99,19 +109,36 @@ export function DashboardFilterBar({
     }
   }
 
+  const searchField = useLiveProperty("s-search-field", "value", controls.text);
+  const trackedBox = useLiveProperty("s-checkbox", "checked", filters.tracked);
+
   return (
     <s-stack slot="filters" direction="inline" gap="small-200">
       <s-search-field
+        ref={searchField}
         label="Search products"
         labelAccessibilityVisibility="exclusive"
         placeholder="Search products"
-        value={controls.text}
         onInput={(event) => controls.search(event.currentTarget.value)}
+      />
+      <FilterButton
+        id="status-filter"
+        label="Status"
+        options={STATUS_OPTIONS}
+        selected={filters.statuses}
+        onApply={(values) => controls.setFilter(FILTER_PARAMS.status, values)}
+      />
+      <FilterButton
+        id="stock-filter"
+        label="Stock"
+        options={STOCK_OPTIONS}
+        selected={filters.stock}
+        onApply={(values) => controls.setFilter(FILTER_PARAMS.stock, values)}
       />
       <FilterButton
         id="type-filter"
         label="Type"
-        options={options.data?.types}
+        options={options.data?.types.map(sameLabel)}
         selected={filters.types}
         onOpen={loadOptions}
         onApply={(values) => controls.setFilter(FILTER_PARAMS.type, values)}
@@ -119,10 +146,20 @@ export function DashboardFilterBar({
       <FilterButton
         id="vendor-filter"
         label="Vendor"
-        options={options.data?.vendors}
+        options={options.data?.vendors.map(sameLabel)}
         selected={filters.vendors}
         onOpen={loadOptions}
         onApply={(values) => controls.setFilter(FILTER_PARAMS.vendor, values)}
+      />
+      <s-checkbox
+        ref={trackedBox}
+        label="Tracked only"
+        onChange={(event) =>
+          controls.setFilter(
+            FILTER_PARAMS.tracked,
+            event.currentTarget.checked ? ["1"] : [],
+          )
+        }
       />
     </s-stack>
   );
@@ -139,14 +176,19 @@ function FilterButton({
   id: string;
   label: string;
   // undefined until loaded
-  options: string[] | undefined;
+  options: Option[] | undefined;
   selected: string[];
-  onOpen: () => void;
+  onOpen?: () => void;
   onApply: (values: string[]) => void;
 }) {
   const [draft, setDraft] = useState(selected);
+  const choiceList = useLiveProperty("s-choice-list", "values", draft);
   // Keep selected values that aren't in the list (renamed, or past its limit) so they can be unticked
-  const choices = [...new Set([...(options ?? []), ...selected])];
+  const listed = new Set(options?.map(({ value }) => value));
+  const choices = [
+    ...(options ?? []),
+    ...selected.filter((value) => !listed.has(value)).map(sameLabel),
+  ];
 
   return (
     <>
@@ -155,10 +197,13 @@ function FilterButton({
         onClick={() => {
           // Start from what's applied, dropping changes from a dismissed popover
           setDraft(selected);
-          onOpen();
+          onOpen?.();
         }}
       >
-        {buttonText(label, selected)}
+        {buttonText(
+          label,
+          selected.map((value) => labelOf(choices, value)),
+        )}
       </s-button>
       <s-popover id={id}>
         <s-box padding="base">
@@ -167,19 +212,15 @@ function FilterButton({
               <s-spinner accessibilityLabel="Loading" />
             )}
             <s-choice-list
+              ref={choiceList}
               label={label}
               labelAccessibilityVisibility="exclusive"
               multiple
               onChange={(event) => setDraft([...event.currentTarget.values])}
             >
               {choices.map((choice) => (
-                <s-choice
-                  key={choice}
-                  value={choice}
-                  // React 18 renders false as the string "false", which counts as set
-                  selected={draft.includes(choice) || undefined}
-                >
-                  {choice}
+                <s-choice key={choice.value} value={choice.value}>
+                  {choice.label}
                 </s-choice>
               ))}
             </s-choice-list>
@@ -212,4 +253,45 @@ function buttonText(label: string, selected: string[]) {
   if (selected.length === 0) return label;
   if (selected.length === 1) return `${label}: ${selected[0]}`;
   return `${label}: ${selected.length} selected`;
+}
+
+function toOptions(labels: Record<string, string>): Option[] {
+  return Object.entries(labels).map(([value, label]) => ({ value, label }));
+}
+
+// Types and vendors are shown as they're stored
+function sameLabel(value: string): Option {
+  return { value, label: value };
+}
+
+function labelOf(options: Option[], value: string): string {
+  return options.find((option) => option.value === value)?.label ?? value;
+}
+
+/**
+ * React 18 passes props to web components as attributes, and Polaris reads
+ * `value`, `checked` and `selected` attributes as the starting state only.
+ * This sets the live property instead, after every render. The tag types the ref.
+ */
+function useLiveProperty<
+  Tag extends keyof HTMLElementTagNameMap,
+  Name extends keyof HTMLElementTagNameMap[Tag],
+>(_tag: Tag, name: Name, value: HTMLElementTagNameMap[Tag][Name]) {
+  const ref = useRef<HTMLElementTagNameMap[Tag]>(null);
+  useEffect(() => {
+    if (ref.current && !sameValue(ref.current[name], value)) {
+      ref.current[name] = value;
+    }
+  });
+  return ref;
+}
+
+// Arrays by contents, so setting the same choices again is a no-op
+function sameValue(current: unknown, next: unknown) {
+  if (!Array.isArray(next)) return current === next;
+  return (
+    Array.isArray(current) &&
+    current.length === next.length &&
+    next.every((value, index) => current[index] === value)
+  );
 }

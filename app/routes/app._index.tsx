@@ -18,39 +18,87 @@ import {
   isInStock,
 } from "../../shared/freshness";
 import {
+  filterRows,
   hasActiveFilters,
+  hasRowFilters,
   parseDashboardFilters,
   toProductQuery,
 } from "../../shared/dashboard-filters";
 import { MAX_BATCHES } from "../../shared/product-metafields";
 
-// One page only in v1. Batches load up to the panel's limit, so totals are
-// complete unless a product has more; at 250 the query requests 269 of 1,000 points.
+// Rows per page. Batches load up to the panel's limit, so totals are complete
+// unless a product has more; at 250 a page requests 269 of 1,000 points.
 const PRODUCT_LIMIT = 50;
+
+// Status, stock and tracked filters look through up to this many pages for
+// matches: about 1,076 of the 2,000 points Shopify's bucket holds
+const ROW_FILTER_PAGES = 4;
 
 interface DashboardData {
   shop: { ianaTimezone: string };
   products: {
     nodes: DashboardProductNode[];
-    pageInfo: { hasNextPage: boolean };
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
   };
 }
+
+type AdminGraphql = Awaited<
+  ReturnType<typeof authenticate.admin>
+>["admin"]["graphql"];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const filters = parseDashboardFilters(new URL(request.url).searchParams);
+  const query = toProductQuery(filters);
+  const pages = hasRowFilters(filters) ? ROW_FILTER_PAGES : 1;
 
-  const response = await admin.graphql(
-    `#graphql
+  const rows: DashboardRow[] = [];
+  let checkedProducts = 0;
+  let hasMoreProducts = false;
+  let after: string | null = null;
+  for (let page = 0; page < pages; page += 1) {
+    const data = await fetchProductPage(admin.graphql, query, after);
+    const today = getShopToday(data.shop.ianaTimezone, new Date());
+    rows.push(
+      ...filterRows(toDashboardRows(data.products.nodes, today), filters),
+    );
+    checkedProducts += data.products.nodes.length;
+    hasMoreProducts = data.products.pageInfo.hasNextPage;
+    after = data.products.pageInfo.endCursor;
+    if (!hasMoreProducts || rows.length >= PRODUCT_LIMIT) break;
+  }
+
+  return {
+    rows: rows.slice(0, PRODUCT_LIMIT),
+    hasMoreProducts: hasMoreProducts || rows.length > PRODUCT_LIMIT,
+    checkedProducts,
+    filters,
+  };
+};
+
+async function fetchProductPage(
+  graphql: AdminGraphql,
+  query: string | null,
+  after: string | null,
+): Promise<DashboardData> {
+  const response = await graphql(
+    `
+      #graphql
       query FreshnessDashboard(
         $productLimit: Int!
         $batchLimit: Int!
         $query: String
+        $after: String
       ) {
         shop {
           ianaTimezone
         }
-        products(first: $productLimit, sortKey: TITLE, query: $query) {
+        products(
+          first: $productLimit
+          after: $after
+          sortKey: TITLE
+          query: $query
+        ) {
           nodes {
             id
             legacyResourceId
@@ -89,31 +137,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
           pageInfo {
             hasNextPage
+            endCursor
           }
         }
-      }`,
+      }
+    `,
     {
       variables: {
         productLimit: PRODUCT_LIMIT,
         batchLimit: MAX_BATCHES,
-        query: toProductQuery(filters),
+        query,
+        after,
       },
     },
   );
   // admin.graphql throws on any GraphQL error, so data is complete here
   const { data } = (await response.json()) as { data: DashboardData };
-
-  const today = getShopToday(data.shop.ianaTimezone, new Date());
-
-  return {
-    rows: toDashboardRows(data.products.nodes, today),
-    hasMoreProducts: data.products.pageInfo.hasNextPage,
-    filters,
-  };
-};
+  return data;
+}
 
 export default function Dashboard() {
-  const { rows, hasMoreProducts, filters } = useLoaderData<typeof loader>();
+  const { rows, hasMoreProducts, checkedProducts, filters } =
+    useLoaderData<typeof loader>();
   const controls = useDashboardFilters(filters);
   const location = useLocation();
   const navigation = useNavigation();
@@ -257,12 +302,19 @@ export default function Dashboard() {
       </s-section>
       {hasMoreProducts && (
         <s-paragraph color="subdued">
-          Showing the first {PRODUCT_LIMIT} products by title.
+          {limitNote(rows.length, checkedProducts, hasRowFilters(filters))}
         </s-paragraph>
       )}
       <PrivacyLink />
     </s-page>
   );
+}
+
+function limitNote(shown: number, checked: number, rowFilters: boolean) {
+  if (shown >= PRODUCT_LIMIT) {
+    return `Showing the first ${PRODUCT_LIMIT} ${rowFilters ? "matching " : ""}products by title.`;
+  }
+  return `Status, stock and tracked filters checked the first ${checked} products. Search or filter by type or vendor to narrow it down.`;
 }
 
 // Units, e.g. "4120+" when some batches didn't load and the total is a lower bound

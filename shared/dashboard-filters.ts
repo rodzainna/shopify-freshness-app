@@ -1,11 +1,42 @@
-// Search and filters the dashboard reads from its URL, e.g. ?q=milk&type=Dairy
+import { type DashboardRow, UNREADABLE } from "./dashboard";
+
+// URL values for the status filter, in the order the choices are listed
+export const STATUS_FILTERS = {
+  expired: "Expired",
+  "use-soon": "Use Soon",
+  fresh: "Fresh",
+  "not-set": "Not set",
+  unreadable: UNREADABLE,
+} as const satisfies Record<string, DashboardRow["status"]>;
+
+export const STOCK_FILTERS = {
+  over: "Over stock",
+  // Matches the badge, which only products with batches get
+  unbatched: "Unbatched (has batches)",
+} as const;
+
+export type StatusFilter = keyof typeof STATUS_FILTERS;
+export type StockFilter = keyof typeof STOCK_FILTERS;
+
+// Search and filters the dashboard reads from its URL, e.g. ?q=milk&status=expired
 export interface DashboardFilters {
   search: string;
   types: string[];
   vendors: string[];
+  statuses: StatusFilter[];
+  stock: StockFilter[];
+  // Only products with batches
+  tracked: boolean;
 }
 
-export const FILTER_PARAMS = { search: "q", type: "type", vendor: "vendor" };
+export const FILTER_PARAMS = {
+  search: "q",
+  type: "type",
+  vendor: "vendor",
+  status: "status",
+  stock: "stock",
+  tracked: "tracked",
+};
 
 export function parseDashboardFilters(
   params: URLSearchParams,
@@ -18,15 +49,51 @@ export function parseDashboardFilters(
         .filter(Boolean),
     ),
   ];
+  // Unknown values (an old or hand-edited URL) are ignored
+  const known = <K extends string>(name: string, values: Record<K, string>) =>
+    list(name).filter((value): value is K => Object.hasOwn(values, value));
   return {
     search: (params.get(FILTER_PARAMS.search) ?? "").trim(),
     types: list(FILTER_PARAMS.type),
     vendors: list(FILTER_PARAMS.vendor),
+    statuses: known(FILTER_PARAMS.status, STATUS_FILTERS),
+    stock: known(FILTER_PARAMS.stock, STOCK_FILTERS),
+    tracked: params.get(FILTER_PARAMS.tracked) === "1",
   };
 }
 
 export function hasActiveFilters(filters: DashboardFilters): boolean {
-  return toProductQuery(filters) !== null;
+  return toProductQuery(filters) !== null || hasRowFilters(filters);
+}
+
+// Filters the app applies to the rows, since Shopify's search can't see them
+export function hasRowFilters(filters: DashboardFilters): boolean {
+  return (
+    filters.statuses.length > 0 || filters.stock.length > 0 || filters.tracked
+  );
+}
+
+/** Rows matching every row filter; several choices in one filter mean any of them. */
+export function filterRows(
+  rows: DashboardRow[],
+  filters: DashboardFilters,
+): DashboardRow[] {
+  const statuses = new Set<string>(
+    filters.statuses.map((status) => STATUS_FILTERS[status]),
+  );
+  return rows.filter(
+    (row) =>
+      (statuses.size === 0 || statuses.has(row.status)) &&
+      (filters.stock.length === 0 ||
+        filters.stock.some((issue) => hasStockIssue(row, issue))) &&
+      (!filters.tracked || row.tracked),
+  );
+}
+
+function hasStockIssue(row: DashboardRow, issue: StockFilter): boolean {
+  return issue === "over"
+    ? row.overStock !== null
+    : row.unbatchedStock !== null;
 }
 
 /**
