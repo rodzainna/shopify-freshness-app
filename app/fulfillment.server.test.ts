@@ -360,27 +360,33 @@ describe("concurrent fulfillments of one product", () => {
     expect(await db.productLock.count({ where: { shop } })).toBe(0);
   });
 
-  it("makes a fulfillment that waits too long retry, then applies it once", async () => {
-    // 4 calls of 450ms keep the first holder busy past the 1.5s wait
-    const { shopify, fulfill } = setup({ delayMs: 450 });
-
-    const [first, second] = await Promise.allSettled([
-      fulfill("gid://shopify/Fulfillment/1", 5),
-      new Promise((resolve) => setTimeout(resolve, 50)).then(() =>
-        fulfill("gid://shopify/Fulfillment/2", 1),
-      ),
-    ]);
-    expect(first.status).toBe("fulfilled");
-    expect(second).toMatchObject({
-      status: "rejected",
-      reason: expect.any(ProductLockBusyError),
+  it("makes a fulfillment blocked past the wait retry, then applies it once", async () => {
+    const { shopify, fulfill } = setup();
+    // Another delivery holds the product for longer than the 1.5s wait
+    await db.productLock.create({
+      data: {
+        shop,
+        productId,
+        token: "other-delivery",
+        expiresAt: new Date(Date.now() + 60_000),
+      },
     });
-    expect(shopify.batch(LATER)?.quantity).toBe(8);
 
-    // Shopify's retry of the 503
-    await fulfill("gid://shopify/Fulfillment/2", 1);
+    await expect(fulfill("gid://shopify/Fulfillment/1", 1)).rejects.toThrow(
+      ProductLockBusyError,
+    );
+    expect(shopify.calls).toStrictEqual([]);
 
-    expect(shopify.batch(LATER)?.quantity).toBe(7);
+    // The holder finishes, then Shopify retries the 503
+    await db.productLock.deleteMany({ where: { shop } });
+    await fulfill("gid://shopify/Fulfillment/1", 1);
+
+    expect(shopify.batch(SOON)?.quantity).toBe(2);
+    expect(shopify.batch(LATER)?.quantity).toBe(10);
+    expect(await discrepancies()).toStrictEqual([]);
+    expect(
+      await db.fulfillmentPlan.count({ where: { shop, appliedAt: null } }),
+    ).toBe(0);
     expect(await db.productLock.count({ where: { shop } })).toBe(0);
-  }, 15_000);
+  });
 });
