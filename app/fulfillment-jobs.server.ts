@@ -156,7 +156,17 @@ export async function runDueJobs(now: Date = new Date()): Promise<number> {
     orderBy: { receivedAt: "asc" },
   });
   // Each run reads the clock itself, so a long sweep doesn't backdate later jobs
-  for (const key of due) await runFulfillmentJob(key);
+  for (const key of due) {
+    try {
+      await runFulfillmentJob(key);
+    } catch (error) {
+      // A database error on one job shouldn't hold up the rest
+      console.error(
+        `Failed to run ${key.fulfillmentId} for ${key.shop}`,
+        error,
+      );
+    }
+  }
   return due.length;
 }
 

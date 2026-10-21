@@ -283,6 +283,33 @@ describe("runDueJobs", () => {
       "gid://shopify/Fulfillment/later",
     ]);
   });
+  it("carries on with later jobs when one hits a database error", async () => {
+    const shopify = setup();
+    for (const [id, receivedAt] of [
+      ["1", "2020-01-15T09:00:00Z"],
+      ["2", "2020-01-15T10:00:00Z"],
+    ]) {
+      await saveFulfillmentJob({
+        shop,
+        fulfillmentId: `gid://shopify/Fulfillment/${id}`,
+        products: [{ productId, quantity: 1 }],
+        receivedAt: new Date(receivedAt),
+      });
+    }
+    // The first job's claim fails
+    vi.spyOn(db.fulfillmentJob, "updateMany").mockRejectedValueOnce(
+      new Error("Database is locked"),
+    );
+
+    await runDueJobs(new Date("2020-01-15T12:00:00Z"));
+
+    expect(shopify.batch(BATCH)?.quantity).toBe(4);
+    expect(console.error).toHaveBeenCalledWith(
+      `Failed to run gid://shopify/Fulfillment/1 for ${shop}`,
+      expect.any(Error),
+    );
+  });
+
   it("bases a job's claim and retry on when it runs, not when the sweep began", async () => {
     const shopify = setup();
     shopify.failNext("GetProductBatches");
