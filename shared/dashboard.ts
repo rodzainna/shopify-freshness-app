@@ -5,10 +5,16 @@ import {
   computeBatchFreshness,
   isCalendarDate,
 } from "./freshness";
+import {
+  type InventoryMismatch,
+  type ProductInventory,
+  getInventoryMismatch,
+  totalBatchQuantity,
+} from "./inventory";
 import { type BatchNode, isReadableBatch } from "./product-metafields";
 
 // The dashboard query's product shape (see app/routes/app._index.tsx)
-export interface DashboardProductNode {
+export interface DashboardProductNode extends ProductInventory {
   id: string;
   // The numeric id admin URLs take
   legacyResourceId: string;
@@ -51,6 +57,12 @@ export interface DashboardRow {
   batches: DashboardBatch[];
   // The query loads a limited number of batches per product
   hasMoreBatches: boolean;
+  // null when Shopify doesn't track the product's inventory
+  stock: number | null;
+  // null when the batches can't be read
+  batchTotal: number | null;
+  // Batches total more than is in stock; not checked when some didn't load
+  inventoryMismatch: InventoryMismatch | null;
 }
 
 export function toDashboardRows(
@@ -66,9 +78,17 @@ export function toDashboardRows(
       adminUrl: `${ADMIN_PRODUCTS}/${product.legacyResourceId}`,
       imageUrl: product.featuredMedia?.preview?.image?.url ?? null,
       earliestExpirationDate: product.earliestExpiration?.value ?? null,
+      stock: product.tracksInventory ? product.totalInventory : null,
     };
     if (!nodes.every(isReadableBatch)) {
-      return { ...row, status: UNREADABLE, batches: [], hasMoreBatches: false };
+      return {
+        ...row,
+        status: UNREADABLE,
+        batches: [],
+        hasMoreBatches: false,
+        batchTotal: null,
+        inventoryMismatch: null,
+      };
     }
 
     const batches = nodes.map((node) => {
@@ -83,11 +103,16 @@ export function toDashboardRows(
       };
     });
 
+    const hasMoreBatches = references?.pageInfo.hasNextPage ?? false;
     return {
       ...row,
       status: computeAggregateFreshness(batches, today),
       batches,
-      hasMoreBatches: references?.pageInfo.hasNextPage ?? false,
+      hasMoreBatches,
+      batchTotal: totalBatchQuantity(batches),
+      inventoryMismatch: hasMoreBatches
+        ? null
+        : getInventoryMismatch(batches, product),
     };
   });
 }

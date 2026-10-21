@@ -11,6 +11,13 @@ export interface InventoryMismatch {
   inStock: number;
 }
 
+// Skips rows with an invalid quantity; validation reports those
+export function totalBatchQuantity(batches: Batch[]): number {
+  return batches
+    .filter((batch) => !validateBatch(batch).quantity)
+    .reduce((total, batch) => total + batch.quantity, 0);
+}
+
 /**
  * Batches are entered by hand, so they can drift from Shopify's stock count.
  *
@@ -23,10 +30,7 @@ export function getInventoryMismatch(
 ): InventoryMismatch | null {
   if (!inventory.tracksInventory) return null;
 
-  // Skip rows with an invalid quantity; validation reports those
-  const batchTotal = batches
-    .filter((batch) => !validateBatch(batch).quantity)
-    .reduce((total, batch) => total + batch.quantity, 0);
+  const batchTotal = totalBatchQuantity(batches);
   // Oversold products report negative stock; treat that as none
   const inStock = Math.max(0, inventory.totalInventory);
 

@@ -16,6 +16,8 @@ function product(
     legacyResourceId: "1",
     title: "Sourdough loaf",
     featuredMedia: null,
+    tracksInventory: false,
+    totalInventory: 0,
     earliestExpiration: null,
     freshnessBatches: null,
     ...overrides,
@@ -72,6 +74,9 @@ describe("toDashboardRows", () => {
         },
       ],
       hasMoreBatches: false,
+      stock: null,
+      batchTotal: 13,
+      inventoryMismatch: null,
     });
   });
 
@@ -86,6 +91,9 @@ describe("toDashboardRows", () => {
         status: "Not set",
         batches: [],
         hasMoreBatches: false,
+        stock: null,
+        batchTotal: 0,
+        inventoryMismatch: null,
       },
     ]);
   });
@@ -142,6 +150,9 @@ describe("toDashboardRows", () => {
         status: UNREADABLE,
         batches: [],
         hasMoreBatches: false,
+        stock: null,
+        batchTotal: null,
+        inventoryMismatch: null,
       },
       expect.objectContaining({
         id: "gid://shopify/Product/2",
@@ -295,6 +306,67 @@ describe("toDashboardRows", () => {
       imageUrl: "https://cdn.shopify.com/loaf.jpg",
     });
     expect(withoutImage.imageUrl).toBeNull();
+  });
+
+  describe("stock and batch total", () => {
+    // Batches of 10 and 20 units
+    const milk = (inventory: object, hasNextPage = false) =>
+      product({
+        ...inventory,
+        freshnessBatches: {
+          references: {
+            nodes: [
+              batch("gid://shopify/Metaobject/1", "10", "2026-10-19"),
+              batch("gid://shopify/Metaobject/2", "20", "2026-11-02"),
+            ],
+            pageInfo: { hasNextPage },
+          },
+        },
+      });
+
+    it("flags batches that total more than the tracked stock", () => {
+      const [row] = toDashboardRows(
+        [milk({ tracksInventory: true, totalInventory: 25 })],
+        TODAY,
+      );
+
+      expect(row).toMatchObject({
+        stock: 25,
+        batchTotal: 30,
+        inventoryMismatch: { batchTotal: 30, inStock: 25 },
+      });
+    });
+
+    it("doesn't flag batches that fit the stock", () => {
+      const [row] = toDashboardRows(
+        [milk({ tracksInventory: true, totalInventory: 30 })],
+        TODAY,
+      );
+
+      expect(row).toMatchObject({ stock: 30, inventoryMismatch: null });
+    });
+
+    it("shows no stock and no flag when inventory isn't tracked", () => {
+      const [row] = toDashboardRows(
+        [milk({ tracksInventory: false, totalInventory: 0 })],
+        TODAY,
+      );
+
+      expect(row).toMatchObject({
+        stock: null,
+        batchTotal: 30,
+        inventoryMismatch: null,
+      });
+    });
+
+    it("doesn't flag when some batches didn't load", () => {
+      const [row] = toDashboardRows(
+        [milk({ tracksInventory: true, totalInventory: 25 }, true)],
+        TODAY,
+      );
+
+      expect(row).toMatchObject({ batchTotal: 30, inventoryMismatch: null });
+    });
   });
 
   it("returns no rows for a store with no products", () => {
