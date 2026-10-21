@@ -347,15 +347,16 @@ describe("concurrent fulfillments of one product", () => {
     expect(shopify.batch(SOON)).toBeUndefined();
     expect(shopify.batch(LATER)?.quantity).toBe(7);
     expect(shopify.product(productId)?.batchIds).toStrictEqual([LATER]);
+    expect(await discrepancies()).toStrictEqual([]);
     expect(
       await db.fulfillmentPlan.count({ where: { shop, appliedAt: null } }),
     ).toBe(0);
     expect(await db.productLock.count({ where: { shop } })).toBe(0);
   });
 
-  it("makes a fulfillment blocked past the wait retry, then applies it once", async () => {
+  it("rejects a fulfillment blocked past the lock wait, then applies its retry once", async () => {
     const { shopify, fulfill } = setup();
-    // Another delivery holds the product for longer than the 1.5s wait
+    // Another delivery holds the product for longer than the lock wait
     await db.productLock.create({
       data: {
         shop,
