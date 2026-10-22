@@ -247,11 +247,9 @@ async function addBatches(
     );
   } catch (error) {
     if (!(error instanceof BatchListChangedError)) {
-      // A write that timed out may still have landed
-      const reread = await readForEdit(admin, productId).catch(() => null);
-      const linked = reread && "batches" in reread ? reread.batches : [];
-      const linkedIds = new Set(linked.map(({ id }) => id));
-      if (created.every(({ id }) => linkedIds.has(id))) {
+      const linked = await readLanded(admin, productId);
+      const linkedIds = new Set(linked?.map(({ id }) => id));
+      if (linked && created.every(({ id }) => linkedIds.has(id))) {
         return { kind: "linked", batches: linked, failedNew };
       }
       throw error;
@@ -285,13 +283,23 @@ async function writeEdits(
     console.error(`Saving batch ${batch.id} on ${productId} failed`, error);
   }
   // A write that timed out may still have landed, so read what Shopify holds
-  const reread = await loadBatches(admin, productId).catch(() => null);
-  if (reread && "batches" in reread) return reread.batches;
+  const reread = await readLanded(admin, productId);
+  if (reread) return reread;
   const failed = new Set(failures.map(({ batch }) => batch.id));
   return applyEdits(
     current,
     updates.filter(({ id }) => !failed.has(id)),
   );
+}
+
+// After a write that timed out, which may still have landed: what Shopify
+// holds now, or null when that can't be read either
+async function readLanded(
+  admin: AdminApiContext,
+  productId: string,
+): Promise<EditableBatch[] | null> {
+  const read = await readForEdit(admin, productId).catch(() => null);
+  return read && "batches" in read ? read.batches : null;
 }
 
 function unavailableMessage(

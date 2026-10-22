@@ -284,6 +284,14 @@ describe("parseBatchEditRequest", () => {
     expect(parseBatchEditRequest(body)).toStrictEqual(body);
   });
 
+  it("accepts as many new batches as a save allows", () => {
+    const most = Array.from({ length: MAX_NEW_BATCHES_PER_SAVE }, () =>
+      fresh(crypto.randomUUID(), 1, "2026-11-01"),
+    );
+
+    expect(parseBatchEditRequest({ ...body, added: most })).not.toBeNull();
+  });
+
   it("reads a request without new batches as adding none", () => {
     const withoutAdded = {
       productId: body.productId,
@@ -327,6 +335,15 @@ describe("parseBatchEditRequest", () => {
       { ...body, added: [fresh("batch-1", 1, "2026-11-01")] },
     ],
     ["a repeated new batch handle", { ...body, added: [...added, ...added] }],
+    [
+      "more new batches than a save allows",
+      {
+        ...body,
+        added: Array.from({ length: MAX_NEW_BATCHES_PER_SAVE + 1 }, () =>
+          fresh(crypto.randomUUID(), 1, "2026-11-01"),
+        ),
+      },
+    ],
   ])("rejects %s", (_case, value) => {
     expect(parseBatchEditRequest(value)).toBeNull();
   });

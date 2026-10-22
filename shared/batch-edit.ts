@@ -95,6 +95,8 @@ function isBatchList(value: unknown): value is EditableBatch[] {
 function isNewBatchList(value: unknown): value is NewBatch[] {
   return (
     Array.isArray(value) &&
+    // Refused before the lock is taken; the planner's check gives the message
+    value.length <= MAX_NEW_BATCHES_PER_SAVE &&
     value.every(
       (batch) =>
         isRecord(batch) &&
