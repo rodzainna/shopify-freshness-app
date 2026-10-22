@@ -178,6 +178,7 @@ describe("planBatchEdit with new batches", () => {
   it("returns its own copy of the new batches", () => {
     const added = [fresh(HANDLE, 1, "2026-11-01")];
     const plan = planBatchEdit(opened, opened, opened, added);
+    added[0].quantity = 9;
     added.pop();
 
     expect(plan).toMatchObject({ additions: [fresh(HANDLE, 1, "2026-11-01")] });

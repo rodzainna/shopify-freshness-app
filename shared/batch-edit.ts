@@ -147,7 +147,11 @@ export function planBatchEdit(
     (batch) => !sameValues(batch, openedById.get(batch.id)!),
   );
   return updates.length > 0 || added.length > 0
-    ? { kind: "write", updates, additions: [...added] }
+    ? {
+        kind: "write",
+        updates,
+        additions: added.map((batch) => ({ ...batch })),
+      }
     : { kind: "unchanged" };
 }
 
