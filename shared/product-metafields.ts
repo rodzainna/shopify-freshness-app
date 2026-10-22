@@ -102,6 +102,110 @@ export interface UserErrorsPayload {
   }[];
 }
 
+// Creates a batch, or updates the one with its handle, so a retry can't duplicate it
+export const UPSERT_BATCH_MUTATION = `#graphql
+  mutation UpsertBatch($handle: String!, $fields: [MetaobjectFieldInput!]!) {
+    metaobjectUpsert(
+      handle: { type: "$app:freshness_batch", handle: $handle }
+      metaobject: { fields: $fields }
+    ) {
+      metaobject {
+        id
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+export interface UpsertBatchData {
+  metaobjectUpsert:
+    (UserErrorsPayload & { metaobject: { id: string } | null }) | null;
+}
+
+export function upsertBatchVariables({
+  handle,
+  quantity,
+  expirationDate,
+}: {
+  handle: string;
+  quantity: number;
+  expirationDate: string;
+}) {
+  return {
+    handle,
+    // Metaobject field values are always sent as strings
+    fields: [
+      { key: "quantity", value: String(quantity) },
+      { key: "expiration_date", value: expirationDate },
+    ],
+  };
+}
+
+// Updates an existing batch by id; unlike an upsert, it can't recreate a deleted one
+export const SET_BATCH_FIELDS_MUTATION = `#graphql
+  mutation SetBatchFields($id: ID!, $metaobject: MetaobjectUpdateInput!) {
+    metaobjectUpdate(id: $id, metaobject: $metaobject) {
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+export interface SetBatchFieldsData {
+  metaobjectUpdate: UserErrorsPayload | null;
+}
+
+// Writes only the batch list, failing with STALE_OBJECT if it changed since read
+export const SAVE_BATCH_LIST_MUTATION = `#graphql
+  mutation SaveBatchList(
+    $productId: ID!
+    $value: String!
+    $compareDigest: String
+  ) {
+    metafieldsSet(
+      metafields: [
+        {
+          ownerId: $productId
+          key: "freshness_batches"
+          value: $value
+          compareDigest: $compareDigest
+        }
+      ]
+    ) {
+      metafields {
+        compareDigest
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+export interface SaveBatchListData {
+  metafieldsSet:
+    | (UserErrorsPayload & { metafields: { compareDigest: string }[] | null })
+    | null;
+}
+
+export function saveBatchListVariables(
+  productId: string,
+  batchIds: string[],
+  compareDigest: string | null,
+) {
+  // An explicit null, not undefined: a missing digest would skip the check
+  return { productId, value: JSON.stringify(batchIds), compareDigest };
+}
+
 export interface SaveProductFreshnessData {
   metafieldsSet?: UserErrorsPayload | null;
   metafieldsDelete?: UserErrorsPayload | null;

@@ -8,13 +8,20 @@ import { getShopToday } from "../shared/freshness";
 import { collectErrorMessages } from "../shared/graphql-errors";
 import {
   MAX_BATCHES,
+  SAVE_BATCH_LIST_MUTATION,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
+  SET_BATCH_FIELDS_MUTATION,
+  type SetBatchFieldsData,
+  UPSERT_BATCH_MUTATION,
+  type UpsertBatchData,
   type SaveProductFreshnessData,
   saveEarliestDateVariables,
   type BatchNode,
   type UserErrorsPayload,
   isReadableBatch,
+  saveBatchListVariables,
   saveProductFreshnessVariables,
+  upsertBatchVariables,
 } from "../shared/product-metafields";
 
 // Shopify rejected the data itself, so retrying the same writes can't succeed
@@ -283,45 +290,18 @@ export async function upsertBatches(
 
 async function upsertBatch(
   admin: AdminApiContext,
-  { handle, quantity, expirationDate }: NewBatch,
+  batch: NewBatch,
 ): Promise<string> {
-  const data = await query<{
-    metaobjectUpsert:
-      (UserErrorsPayload & { metaobject: { id: string } | null }) | null;
-  }>(
+  const data = await query<UpsertBatchData>(
     admin,
-    `#graphql
-      mutation UpsertBatch(
-        $handle: String!
-        $fields: [MetaobjectFieldInput!]!
-      ) {
-        metaobjectUpsert(
-          handle: { type: "$app:freshness_batch", handle: $handle }
-          metaobject: { fields: $fields }
-        ) {
-          metaobject {
-            id
-          }
-          userErrors {
-            field
-            message
-            code
-          }
-        }
-      }`,
-    {
-      handle,
-      fields: [
-        { key: "quantity", value: String(quantity) },
-        { key: "expiration_date", value: expirationDate },
-      ],
-    },
+    UPSERT_BATCH_MUTATION,
+    upsertBatchVariables(batch),
   );
   const result = data.metaobjectUpsert;
-  throwOnUserErrors(`Saving new batch ${handle}`, result?.userErrors);
+  throwOnUserErrors(`Saving new batch ${batch.handle}`, result?.userErrors);
   if (!result?.metaobject) {
     throw new PermanentShopifyError(
-      `Saving new batch ${handle} returned no id`,
+      `Saving new batch ${batch.handle} returned no id`,
     );
   }
   return result.metaobject.id;
@@ -341,31 +321,8 @@ export async function saveBatchList(
 ): Promise<void> {
   const data = await query<{ metafieldsSet: UserErrorsPayload | null }>(
     admin,
-    `#graphql
-      mutation SaveBatchList(
-        $productId: ID!
-        $value: String!
-        $compareDigest: String
-      ) {
-        metafieldsSet(
-          metafields: [
-            {
-              ownerId: $productId
-              key: "freshness_batches"
-              value: $value
-              compareDigest: $compareDigest
-            }
-          ]
-        ) {
-          userErrors {
-            field
-            message
-            code
-          }
-        }
-      }`,
-    // An explicit null, not undefined: a missing digest would skip the check
-    { productId, value: JSON.stringify(batchIds), compareDigest },
+    SAVE_BATCH_LIST_MUTATION,
+    saveBatchListVariables(productId, batchIds, compareDigest),
   );
   const errors = data.metafieldsSet?.userErrors ?? [];
   if (errors.some(({ code }) => code === "STALE_OBJECT")) {
@@ -456,20 +413,9 @@ async function setBatchFields(
   action: string,
   fields: { key: "quantity" | "expiration_date"; value: string }[],
 ): Promise<void> {
-  const data = await query<{
-    metaobjectUpdate: UserErrorsPayload | null;
-  }>(
+  const data = await query<SetBatchFieldsData>(
     admin,
-    `#graphql
-      mutation SetBatchFields($id: ID!, $metaobject: MetaobjectUpdateInput!) {
-        metaobjectUpdate(id: $id, metaobject: $metaobject) {
-          userErrors {
-            field
-            message
-            code
-          }
-        }
-      }`,
+    SET_BATCH_FIELDS_MUTATION,
     { id, metaobject: { fields } },
   );
   throwOnUserErrors(action, data.metaobjectUpdate?.userErrors);

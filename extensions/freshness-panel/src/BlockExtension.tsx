@@ -16,12 +16,26 @@ import {
 } from "../../../shared/inventory";
 import { collectErrorMessages } from "../../../shared/graphql-errors";
 import {
+  listLanded,
+  planPanelSave,
+  unlinkedCreates,
+} from "../../../shared/panel-save";
+import {
   MAX_BATCHES,
+  SAVE_BATCH_LIST_MUTATION,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
+  SET_BATCH_FIELDS_MUTATION,
+  type SaveBatchListData,
   type SaveProductFreshnessData,
+  type SetBatchFieldsData,
+  UPSERT_BATCH_MUTATION,
+  type UpsertBatchData,
   type UserErrorsPayload,
   isReadableBatch,
+  saveBatchListVariables,
+  saveEarliestDateVariables,
   saveProductFreshnessVariables,
+  upsertBatchVariables,
 } from "../../../shared/product-metafields";
 import { applySavedIds, failedItems } from "../../../shared/settled";
 import {
@@ -34,6 +48,7 @@ import { useRef, useState } from "preact/hooks";
 
 interface PanelProduct extends ProductInventory {
   freshnessBatches: {
+    compareDigest: string;
     references: {
       // null for a batch that no longer resolves
       nodes: (FreshnessBatchNode | null)[];
@@ -51,6 +66,8 @@ interface LoadedPanelData {
   shop: PanelData["shop"];
   product: PanelProduct;
   batches: PanelBatch[];
+  // null when the product has no batch list yet
+  listDigest: string | null;
 }
 
 export default async () => {
@@ -82,10 +99,14 @@ async function mountPanel(productId: string) {
 
   render(
     <Extension
+      // A reload remounts the editor, so no unsaved state carries over
+      key={Date.now()}
       productId={productId}
       timezone={data.shop.ianaTimezone}
       initialBatches={data.batches}
+      initialListDigest={data.listDigest}
       inventory={data.product}
+      onReload={() => mountPanel(productId)}
     />,
     document.body,
   );
@@ -103,6 +124,7 @@ async function loadPanelData(productId: string): Promise<LoadedPanelData> {
         tracksInventory
         totalInventory
         freshnessBatches: metafield(key: "freshness_batches") {
+          compareDigest
           references(first: $maxBatches) {
             nodes {
               ... on Metaobject {
@@ -155,6 +177,7 @@ async function loadPanelData(productId: string): Promise<LoadedPanelData> {
     shop: data.shop,
     product: data.product,
     batches: nodes.map(toPanelBatch),
+    listDigest: data.product.freshnessBatches?.compareDigest ?? null,
   };
 }
 
@@ -187,50 +210,12 @@ function toPanelBatch(node: FreshnessBatchNode): PanelBatch {
   };
 }
 
-interface SaveBatchData {
-  metaobjectUpsert: {
-    metaobject: { id: string } | null;
-    userErrors: { field: string[] | null; message: string }[];
-  } | null;
-}
-
 // Creates the batch in Shopify, or updates it if its handle already exists.
 // Returns the batch's Shopify ID.
 async function saveBatch(batch: PanelBatch): Promise<string> {
-  const { data, errors } = await shopify.query<SaveBatchData>(
-    `
-    mutation SaveBatch(
-      $handle: String!
-      $quantity: String!
-      $expirationDate: String!
-    ) {
-      metaobjectUpsert(
-        handle: { type: "$app:freshness_batch", handle: $handle }
-        metaobject: {
-          fields: [
-            { key: "quantity", value: $quantity }
-            { key: "expiration_date", value: $expirationDate }
-          ]
-        }
-      ) {
-        metaobject {
-          id
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `,
-    {
-      variables: {
-        handle: batch.handle,
-        // Metaobject field values are always sent as strings
-        quantity: String(batch.quantity),
-        expirationDate: batch.expirationDate,
-      },
-    },
+  const { data, errors } = await shopify.query<UpsertBatchData>(
+    UPSERT_BATCH_MUTATION,
+    { variables: upsertBatchVariables(batch) },
   );
 
   // errors = the request itself failed; userErrors = Shopify rejected the values
@@ -244,22 +229,73 @@ async function saveBatch(batch: PanelBatch): Promise<string> {
   return result.metaobject.id;
 }
 
-// Points the product at its saved batches and updates the date the storefront
-// reads. See planProductMetafieldWrites for what gets set vs deleted.
-async function saveProductFreshness(
+// The list changed since the panel loaded it, so it wasn't overwritten
+class BatchListChangedError extends Error {}
+
+// Writes the list only if it's still the one loaded; returns its new digest
+async function saveBatchList(
   productId: string,
   batchIds: string[],
-  earliestExpirationDate: string | null,
+  compareDigest: string | null,
+): Promise<string | null> {
+  const { data, errors } = await shopify.query<SaveBatchListData>(
+    SAVE_BATCH_LIST_MUTATION,
+    { variables: saveBatchListVariables(productId, batchIds, compareDigest) },
+  );
+
+  const userErrors = data?.metafieldsSet?.userErrors ?? [];
+  if (userErrors.some(({ code }) => code === "STALE_OBJECT")) {
+    throw new BatchListChangedError();
+  }
+  const messages = collectErrorMessages(errors, userErrors);
+  if (messages.length > 0) {
+    throw new Error(`Saving the batch list failed: ${messages.join("; ")}`);
+  }
+
+  // Without a digest the next save reports "changed" rather than overwriting
+  return data?.metafieldsSet?.metafields?.[0]?.compareDigest ?? null;
+}
+
+// Updates a saved batch by id, so one deleted elsewhere fails instead of
+// coming back unlinked
+async function writeBatch({
+  id,
+  quantity,
+  expirationDate,
+}: PanelBatch): Promise<void> {
+  const { data, errors } = await shopify.query<SetBatchFieldsData>(
+    SET_BATCH_FIELDS_MUTATION,
+    {
+      variables: {
+        id,
+        metaobject: {
+          fields: [
+            { key: "quantity", value: String(quantity) },
+            { key: "expiration_date", value: expirationDate },
+          ],
+        },
+      },
+    },
+  );
+
+  const messages = collectErrorMessages(
+    errors,
+    data?.metaobjectUpdate?.userErrors,
+  );
+  if (messages.length > 0) {
+    throw new Error(`Saving batch failed: ${messages.join("; ")}`);
+  }
+}
+
+// Sets or deletes the product's freshness metafields; see
+// planProductMetafieldWrites for which
+async function saveFreshnessMetafields(
+  variables: ReturnType<typeof saveProductFreshnessVariables>,
+  action: string,
 ): Promise<void> {
   const { data, errors } = await shopify.query<SaveProductFreshnessData>(
     SAVE_PRODUCT_FRESHNESS_MUTATION,
-    {
-      variables: saveProductFreshnessVariables(
-        productId,
-        batchIds,
-        earliestExpirationDate,
-      ),
-    },
+    { variables },
   );
 
   const messages = collectErrorMessages(
@@ -267,10 +303,15 @@ async function saveProductFreshness(
     data?.metafieldsSet?.userErrors,
     data?.metafieldsDelete?.userErrors,
   );
-
   if (messages.length > 0) {
-    throw new Error(`Saving product freshness failed: ${messages.join("; ")}`);
+    throw new Error(`${action} failed: ${messages.join("; ")}`);
   }
+}
+
+// What Shopify holds now, after a write that may or may not have landed;
+// null when that can't be read either
+async function readCurrent(productId: string): Promise<LoadedPanelData | null> {
+  return loadPanelData(productId).catch(() => null);
 }
 
 interface DeleteBatchData {
@@ -362,26 +403,37 @@ function LoadError({
   );
 }
 
+interface SaveNotice {
+  tone: "critical" | "warning";
+  heading: string;
+  message: string;
+  // The list changed elsewhere, so the only way forward is a reload
+  reload?: boolean;
+}
+
 function Extension({
   productId,
   timezone,
   initialBatches,
+  initialListDigest,
   inventory,
+  onReload,
 }: {
   productId: string;
   timezone: string;
   initialBatches: PanelBatch[];
+  initialListDigest: string | null;
   inventory: ProductInventory;
+  onReload: () => Promise<void>;
 }) {
   const today = getShopToday(timezone, new Date());
 
   const [batches, setBatches] = useState<PanelBatch[]>(initialBatches);
+  // What Shopify holds, so a save writes only what changed since
+  const [saved, setSaved] = useState<PanelBatch[]>(initialBatches);
+  const [listDigest, setListDigest] = useState(initialListDigest);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<{
-    tone: "critical" | "warning";
-    heading: string;
-    message: string;
-  } | null>(null);
+  const [saveError, setSaveError] = useState<SaveNotice | null>(null);
   // Saved batches the merchant removed; their metaobjects go on the next save
   const [removedIds, setRemovedIds] = useState<string[]>([]);
   // Errors stay hidden until the first save attempt, then update live
@@ -392,40 +444,132 @@ function Extension({
     setShowErrors(true);
     if (batches.some((batch) => hasErrors(validateBatch(batch)))) return;
 
+    const listChangedNotice: SaveNotice = {
+      tone: "critical",
+      heading: "Batches weren't saved",
+      message:
+        "These batches changed since you opened them, so nothing was saved. Reload to see the current batches.",
+      reload: true,
+    };
+
     setSaving(true);
     try {
-      // Rows that saved keep their Shopify ID even if another row failed,
-      // so removing one later still deletes its metaobject
-      const upserts = await Promise.allSettled(batches.map(saveBatch));
-      const { items: saved, errors } = applySavedIds(batches, upserts);
-      setBatches(saved);
-      if (errors.length > 0) throw errors[0];
+      const plan = planPanelSave(saved, batches);
 
-      // Only link the batches once every one of them saved, so the product
-      // never points at a batch that doesn't exist
-      await saveProductFreshness(
-        productId,
-        saved.map((batch) => batch.id),
-        getEarliestExpirationDate(saved),
+      // Created by handle, so a retry reuses them instead of duplicating. Rows
+      // that saved keep their id even if another failed, so removing one
+      // later still deletes it.
+      const creates = await Promise.allSettled(plan.creates.map(saveBatch));
+      const created = applySavedIds(plan.creates, creates);
+      const idByHandle = new Map(
+        created.items.map((row) => [row.handle, row.id]),
       );
+      const rows = batches.map((row) => ({
+        ...row,
+        id: idByHandle.get(row.handle) ?? row.id,
+      }));
+      setBatches(rows);
+      if (created.errors.length > 0) throw created.errors[0];
+      const newIds = created.items.map((row) => row.id);
+
+      if (plan.listChanged && rows.length === 0) {
+        // Deletes take no digest, so check the list is still the one loaded
+        const current = await loadPanelData(productId);
+        if (current.listDigest !== listDigest) {
+          setSaveError(listChangedNotice);
+          return;
+        }
+        await saveFreshnessMetafields(
+          saveProductFreshnessVariables(productId, [], null),
+          "Removing the batch list",
+        );
+        setListDigest(null);
+      } else if (plan.listChanged) {
+        const ids = rows.map((row) => row.id);
+        try {
+          setListDigest(await saveBatchList(productId, ids, listDigest));
+        } catch (error) {
+          const current = await readCurrent(productId);
+          const linkedIds = current
+            ? new Set(current.batches.map((batch) => batch.id))
+            : null;
+          if (error instanceof BatchListChangedError) {
+            await Promise.allSettled(
+              unlinkedCreates(newIds, linkedIds).map(deleteBatch),
+            );
+            setSaveError(listChangedNotice);
+            return;
+          }
+          // A write that timed out may still have landed
+          if (!current || !listLanded(ids, linkedIds)) throw error;
+          setListDigest(current.listDigest);
+        }
+      }
+
+      const updates = await Promise.allSettled(plan.updates.map(writeBatch));
+      const updated = new Set(
+        plan.updates
+          .filter((_, index) => updates[index].status === "fulfilled")
+          .map((row) => row.id),
+      );
+      const savedById = new Map(saved.map((row) => [row.id, row]));
+      // Rows whose update failed still hold their old values in Shopify
+      setSaved(
+        rows.map((row) =>
+          savedById.has(row.id) && !updated.has(row.id)
+            ? savedById.get(row.id)!
+            : row,
+        ),
+      );
+
+      // The list is saved by now, so later problems are reported as partial
+      const updateFailure = updates.find(
+        (result) => result.status === "rejected",
+      );
+      let problem: SaveNotice | undefined = updateFailure && {
+        tone: "critical",
+        heading: "Some batches weren't saved",
+        message: errorMessage(updateFailure.reason),
+      };
+      if (rows.length > 0) {
+        try {
+          // From what Shopify holds now, so a batch sold out or removed
+          // elsewhere can't set the date
+          const current = await loadPanelData(productId);
+          await saveFreshnessMetafields(
+            saveEarliestDateVariables(
+              productId,
+              getEarliestExpirationDate(current.batches),
+            ),
+            "Saving the earliest date",
+          );
+        } catch (error) {
+          problem ??= {
+            tone: "warning",
+            heading: "Saved, but the earliest expiry date didn't update",
+            message: errorMessage(error),
+          };
+        }
+      }
       // Rows added after a successful save start without errors again
-      setShowErrors(false);
+      if (!updateFailure) setShowErrors(false);
 
       // Delete last, so a failure can't leave the product referencing a
       // missing batch. Failed deletes stay queued for the next save.
       const deletes = await Promise.allSettled(removedIds.map(deleteBatch));
       setRemovedIds(failedItems(removedIds, deletes));
 
-      const firstFailure = deletes.find(
+      const deleteFailure = deletes.find(
         (result) => result.status === "rejected",
       );
-      if (firstFailure) {
-        setSaveError({
+      if (deleteFailure) {
+        problem ??= {
           tone: "warning",
           heading: "Saved, but a removed batch wasn't deleted",
-          message: errorMessage(firstFailure.reason),
-        });
+          message: errorMessage(deleteFailure.reason),
+        };
       }
+      if (problem) setSaveError(problem);
     } catch (error) {
       setSaveError({
         tone: "critical",
@@ -484,6 +628,15 @@ function Extension({
         {saveError && (
           <s-banner heading={saveError.heading} tone={saveError.tone}>
             {saveError.message}
+            {saveError.reload && (
+              <s-button
+                slot="secondary-actions"
+                variant="secondary"
+                onClick={onReload}
+              >
+                Reload
+              </s-button>
+            )}
           </s-banner>
         )}
         {mismatch && (
