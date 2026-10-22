@@ -2,17 +2,30 @@ import { describe, it, expect } from "vitest";
 
 import {
   type EditableBatch,
+  type NewBatch,
   applyEdits,
+  isBatchHandle,
+  validateNewBatches,
   parseBatchEditRequest,
   planBatchEdit,
   validateEdit,
 } from "./batch-edit";
+import { MAX_BATCHES } from "./product-metafields";
 
 const loaf = (id: string, quantity: number, expirationDate: string) => ({
   id,
   quantity,
   expirationDate,
 });
+
+const HANDLE = "3f2b8c1e-9d4a-4b7e-8f6a-2c1d0e9b8a7f";
+const OTHER_HANDLE = "a1b2c3d4-e5f6-4a7b-9c8d-0e1f2a3b4c5d";
+
+const fresh = (
+  handle: string,
+  quantity: number,
+  expirationDate: string,
+): NewBatch => ({ handle, quantity, expirationDate });
 
 const opened: EditableBatch[] = [
   loaf("a", 6, "2026-10-23"),
@@ -26,6 +39,7 @@ describe("planBatchEdit", () => {
     expect(planBatchEdit(opened, opened, edited)).toStrictEqual({
       kind: "write",
       updates: [loaf("b", 10, "2026-10-30")],
+      additions: [],
     });
   });
 
@@ -41,6 +55,7 @@ describe("planBatchEdit", () => {
     expect(planBatchEdit(opened, [...opened].reverse(), edited)).toStrictEqual({
       kind: "write",
       updates: [loaf("a", 5, "2026-10-23")],
+      additions: [],
     });
   });
 
@@ -82,6 +97,116 @@ describe("planBatchEdit", () => {
     expect(() => planBatchEdit(opened, opened, edited)).toThrow(
       "The edits don't match the batches that were opened",
     );
+  });
+});
+
+describe("planBatchEdit with new batches", () => {
+  it("adds batches to a product that has none", () => {
+    const added = [fresh(HANDLE, 12, "2026-11-15")];
+
+    expect(planBatchEdit([], [], [], added)).toStrictEqual({
+      kind: "write",
+      updates: [],
+      additions: added,
+    });
+  });
+
+  it("adds batches alongside edits to the opened ones", () => {
+    const edited = [loaf("a", 5, "2026-10-23"), opened[1]];
+    const added = [fresh(HANDLE, 3, "2026-11-01")];
+
+    expect(planBatchEdit(opened, opened, edited, added)).toStrictEqual({
+      kind: "write",
+      updates: [loaf("a", 5, "2026-10-23")],
+      additions: added,
+    });
+  });
+
+  it("reports a new batch's errors under its handle, with the panel's messages", () => {
+    const added = [fresh(HANDLE, 0, "2026-02-30")];
+
+    expect(planBatchEdit(opened, opened, opened, added)).toStrictEqual({
+      kind: "invalid",
+      errors: {
+        [HANDLE]: {
+          quantity: "Must be at least 1",
+          expirationDate: "Enter a valid date",
+        },
+      },
+    });
+  });
+
+  it("refuses new batches when the opened ones changed", () => {
+    const current = [loaf("a", 2, "2026-10-23"), opened[1]];
+    const added = [fresh(HANDLE, 3, "2026-11-01")];
+
+    expect(planBatchEdit(opened, current, opened, added)).toStrictEqual({
+      kind: "changed",
+    });
+  });
+
+  it("refuses to go over the batch limit", () => {
+    const many = Array.from({ length: MAX_BATCHES - 1 }, (_, index) =>
+      loaf(`b${index}`, 1, "2026-11-01"),
+    );
+    const added = [
+      fresh(HANDLE, 1, "2026-11-01"),
+      fresh(OTHER_HANDLE, 1, "2026-11-01"),
+    ];
+
+    expect(planBatchEdit(many, many, many, added)).toStrictEqual({
+      kind: "tooMany",
+      max: MAX_BATCHES,
+    });
+    expect(planBatchEdit(many, many, many, added.slice(1))).toMatchObject({
+      kind: "write",
+    });
+  });
+
+  it.each([
+    [
+      "repeats a handle",
+      [fresh(HANDLE, 1, "2026-11-01"), fresh(HANDLE, 2, "2026-11-02")],
+    ],
+    ["has a handle that isn't a UUID", [fresh("batch-1", 1, "2026-11-01")]],
+    ["reuse an opened batch's id", [fresh(HANDLE, 1, "2026-11-01")]],
+  ])("throws when the new batches %s", (_case, added) => {
+    const withUuidId = [...opened, loaf(HANDLE, 2, "2026-10-30")];
+
+    expect(() =>
+      planBatchEdit(withUuidId, withUuidId, withUuidId, added),
+    ).toThrow("The edits don't match the batches that were opened");
+  });
+});
+
+describe("validateNewBatches", () => {
+  it("keys errors by handle and skips valid batches", () => {
+    expect(
+      validateNewBatches([
+        fresh(HANDLE, 2, "2026-11-01"),
+        fresh(OTHER_HANDLE, 1.5, ""),
+      ]),
+    ).toStrictEqual({
+      [OTHER_HANDLE]: {
+        quantity: "Must be a whole number",
+        expirationDate: "Enter an expiry date",
+      },
+    });
+  });
+});
+
+describe("isBatchHandle", () => {
+  it("accepts a randomUUID handle", () => {
+    expect(isBatchHandle(crypto.randomUUID())).toBe(true);
+  });
+
+  it.each([
+    ["uppercase", HANDLE.toUpperCase()],
+    ["not version 4", "3f2b8c1e-9d4a-1b7e-8f6a-2c1d0e9b8a7f"],
+    ["a Shopify GID", "gid://shopify/Metaobject/1"],
+    ["empty", ""],
+  ])("rejects %s", (_case, value) => {
+    expect(isBatchHandle(value)).toBe(false);
   });
 });
 
