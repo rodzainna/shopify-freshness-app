@@ -22,9 +22,13 @@ export type BatchEditPlan =
   | { kind: "invalid"; errors: Record<string, BatchErrors> }
   // The batches changed since the editor opened, so nothing is written
   | { kind: "changed" }
-  | { kind: "tooMany"; max: number }
+  // Over the batches a product can hold, or that one save may add
+  | { kind: "tooMany"; limit: "product" | "save"; max: number }
   | { kind: "unchanged" }
   | { kind: "write"; updates: EditableBatch[]; additions: NewBatch[] };
+
+// Keeps a save's lookups and creates well inside the product lock's TTL
+export const MAX_NEW_BATCHES_PER_SAVE = 25;
 
 // Lowercase v4 UUIDs, as crypto.randomUUID() makes them
 const BATCH_HANDLE =
@@ -56,17 +60,23 @@ export type BatchEditRequest = {
   productId: string;
   opened: EditableBatch[];
   edited: EditableBatch[];
+  added: NewBatch[];
 };
+
+// Batch ids are Shopify GIDs, so they can never equal a new batch's UUID handle
+const METAOBJECT_GID = /^gid:\/\/shopify\/Metaobject\/\d+$/;
 
 /** The editor's request body, or null when it isn't shaped like one. */
 export function parseBatchEditRequest(body: unknown): BatchEditRequest | null {
   if (!isRecord(body)) return null;
-  const { productId, opened, edited } = body;
+  const { productId, opened, edited, added = [] } = body;
   if (typeof productId !== "string" || !PRODUCT_GID.test(productId)) {
     return null;
   }
-  if (!isBatchList(opened) || !isBatchList(edited)) return null;
-  return { productId, opened, edited };
+  if (!isBatchList(opened) || !isBatchList(edited) || !isNewBatchList(added)) {
+    return null;
+  }
+  return { productId, opened, edited, added };
 }
 
 function isBatchList(value: unknown): value is EditableBatch[] {
@@ -76,9 +86,31 @@ function isBatchList(value: unknown): value is EditableBatch[] {
       (batch) =>
         isRecord(batch) &&
         typeof batch.id === "string" &&
-        typeof batch.quantity === "number" &&
-        typeof batch.expirationDate === "string",
+        METAOBJECT_GID.test(batch.id) &&
+        hasBatchValues(batch),
     )
+  );
+}
+
+function isNewBatchList(value: unknown): value is NewBatch[] {
+  return (
+    Array.isArray(value) &&
+    // Refused before the lock is taken; the planner's check gives the message
+    value.length <= MAX_NEW_BATCHES_PER_SAVE &&
+    value.every(
+      (batch) =>
+        isRecord(batch) &&
+        typeof batch.handle === "string" &&
+        hasBatchValues(batch),
+    ) &&
+    uniqueUuidHandles(value)
+  );
+}
+
+function hasBatchValues(batch: Record<string, unknown>): boolean {
+  return (
+    typeof batch.quantity === "number" &&
+    typeof batch.expirationDate === "string"
   );
 }
 
@@ -138,8 +170,11 @@ export function planBatchEdit(
   if (Object.keys(errors).length > 0) return { kind: "invalid", errors };
 
   if (!sameBatches(opened, current)) return { kind: "changed" };
+  if (added.length > MAX_NEW_BATCHES_PER_SAVE) {
+    return { kind: "tooMany", limit: "save", max: MAX_NEW_BATCHES_PER_SAVE };
+  }
   if (current.length + added.length > MAX_BATCHES) {
-    return { kind: "tooMany", max: MAX_BATCHES };
+    return { kind: "tooMany", limit: "product", max: MAX_BATCHES };
   }
 
   const openedById = new Map(opened.map((batch) => [batch.id, batch]));

@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   type EditableBatch,
   type NewBatch,
+  MAX_NEW_BATCHES_PER_SAVE,
   applyEdits,
   isBatchHandle,
   validateNewBatches,
@@ -156,9 +157,26 @@ describe("planBatchEdit with new batches", () => {
 
     expect(planBatchEdit(many, many, many, added)).toStrictEqual({
       kind: "tooMany",
+      limit: "product",
       max: MAX_BATCHES,
     });
     expect(planBatchEdit(many, many, many, added.slice(1))).toMatchObject({
+      kind: "write",
+    });
+  });
+
+  it("refuses to add more than a save allows", () => {
+    const handles = Array.from({ length: MAX_NEW_BATCHES_PER_SAVE + 1 }, () =>
+      crypto.randomUUID(),
+    );
+    const added = handles.map((handle) => fresh(handle, 1, "2026-11-01"));
+
+    expect(planBatchEdit([], [], [], added)).toStrictEqual({
+      kind: "tooMany",
+      limit: "save",
+      max: MAX_NEW_BATCHES_PER_SAVE,
+    });
+    expect(planBatchEdit([], [], [], added.slice(1))).toMatchObject({
       kind: "write",
     });
   });
@@ -250,14 +268,41 @@ describe("applyEdits", () => {
 });
 
 describe("parseBatchEditRequest", () => {
+  const stored = [
+    loaf("gid://shopify/Metaobject/1", 6, "2026-10-23"),
+    loaf("gid://shopify/Metaobject/2", 12, "2026-10-28"),
+  ];
+  const added = [fresh(HANDLE, 3, "2026-11-01")];
   const body = {
     productId: "gid://shopify/Product/1",
-    opened,
-    edited: opened,
+    opened: stored,
+    edited: stored,
+    added,
   };
 
   it("accepts a well-formed request", () => {
     expect(parseBatchEditRequest(body)).toStrictEqual(body);
+  });
+
+  it("accepts as many new batches as a save allows", () => {
+    const most = Array.from({ length: MAX_NEW_BATCHES_PER_SAVE }, () =>
+      fresh(crypto.randomUUID(), 1, "2026-11-01"),
+    );
+
+    expect(parseBatchEditRequest({ ...body, added: most })).not.toBeNull();
+  });
+
+  it("reads a request without new batches as adding none", () => {
+    const withoutAdded = {
+      productId: body.productId,
+      opened: stored,
+      edited: stored,
+    };
+
+    expect(parseBatchEditRequest(withoutAdded)).toStrictEqual({
+      ...withoutAdded,
+      added: [],
+    });
   });
 
   it.each([
@@ -266,11 +311,38 @@ describe("parseBatchEditRequest", () => {
     ["a non-list of batches", { ...body, edited: "x" }],
     [
       "a quantity sent as text",
-      { ...body, edited: [{ ...opened[0], quantity: "6" }] },
+      { ...body, edited: [{ ...stored[0], quantity: "6" }] },
     ],
     [
       "a batch without an id",
       { ...body, opened: [{ quantity: 1, expirationDate: "" }] },
+    ],
+    [
+      "a batch id that isn't a Metaobject GID",
+      { ...body, opened: [loaf(HANDLE, 6, "2026-10-23")] },
+    ],
+    ["new batches that aren't a list", { ...body, added: "x" }],
+    [
+      "a new batch without a handle",
+      { ...body, added: [{ quantity: 1, expirationDate: "2026-11-01" }] },
+    ],
+    [
+      "a new batch's quantity sent as text",
+      { ...body, added: [{ ...added[0], quantity: "3" }] },
+    ],
+    [
+      "a new batch handle that isn't a UUID",
+      { ...body, added: [fresh("batch-1", 1, "2026-11-01")] },
+    ],
+    ["a repeated new batch handle", { ...body, added: [...added, ...added] }],
+    [
+      "more new batches than a save allows",
+      {
+        ...body,
+        added: Array.from({ length: MAX_NEW_BATCHES_PER_SAVE + 1 }, () =>
+          fresh(crypto.randomUUID(), 1, "2026-11-01"),
+        ),
+      },
     ],
   ])("rejects %s", (_case, value) => {
     expect(parseBatchEditRequest(value)).toBeNull();

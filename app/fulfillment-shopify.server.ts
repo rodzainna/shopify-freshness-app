@@ -3,6 +3,7 @@ import type {
   FulfillmentPlanData,
   StoredBatch,
 } from "../shared/fulfillment-plan";
+import type { NewBatch } from "../shared/batch-edit";
 import { getShopToday } from "../shared/freshness";
 import { collectErrorMessages } from "../shared/graphql-errors";
 import {
@@ -19,6 +20,11 @@ import {
 // Shopify rejected the data itself, so retrying the same writes can't succeed
 export class PermanentShopifyError extends Error {
   name = "PermanentShopifyError";
+}
+
+// The batch list changed since it was read, so it wasn't overwritten
+export class BatchListChangedError extends Error {
+  name = "BatchListChangedError";
 }
 
 // admin.graphql throws on top-level GraphQL errors, so only userErrors
@@ -53,6 +59,7 @@ interface ProductBatchesData {
   product: {
     earliestExpiration: { value: string } | null;
     freshnessBatches: {
+      compareDigest: string;
       references: {
         // null for a batch that no longer resolves
         nodes: (BatchNode | null)[];
@@ -64,8 +71,13 @@ interface ProductBatchesData {
 
 // notTracked: the product has no batch list, so the app has nothing to update
 export type ProductBatches =
-  | { batches: StoredBatch[]; earliestExpirationDate: string | null }
-  | { notTracked: true }
+  | {
+      batches: StoredBatch[];
+      earliestExpirationDate: string | null;
+      // Lets a list write fail instead of overwriting someone else's change
+      listDigest: string;
+    }
+  | { notTracked: true; earliestExpirationDate: string | null }
   | { problem: "product_not_found" | "too_many_batches" };
 
 export async function readProductBatches(
@@ -81,6 +93,7 @@ export async function readProductBatches(
             value
           }
           freshnessBatches: metafield(key: "freshness_batches") {
+            compareDigest
             references(first: $maxBatches) {
               nodes {
                 ... on Metaobject {
@@ -104,7 +117,10 @@ export async function readProductBatches(
   );
 
   if (!product) return { problem: "product_not_found" };
-  if (!product.freshnessBatches) return { notTracked: true };
+  const earliestExpirationDate = product.earliestExpiration?.value ?? null;
+  if (!product.freshnessBatches) {
+    return { notTracked: true, earliestExpirationDate };
+  }
   const { references } = product.freshnessBatches;
   // Writing back a list we couldn't fully read would unlink batches, so stop
   if (!references || !references.nodes.every(isReadableBatch)) {
@@ -120,7 +136,8 @@ export async function readProductBatches(
       quantity: Number(node.quantity?.value ?? 0),
       expirationDate: node.expirationDate?.value ?? "",
     })),
-    earliestExpirationDate: product.earliestExpiration?.value ?? null,
+    earliestExpirationDate,
+    listDigest: product.freshnessBatches.compareDigest,
   };
 }
 
@@ -196,6 +213,176 @@ export async function writeBatchValues(
     setBatchValues(admin, batch),
   );
   return failures.map(({ item, error }) => ({ batch: item, error }));
+}
+
+/**
+ * The handles that already belong to a batch some product lists. A batch no
+ * product lists is a failed save's leftover, so it isn't included.
+ */
+export async function findListedHandles(
+  admin: AdminApiContext,
+  handles: string[],
+): Promise<Set<string>> {
+  const listed = new Set<string>();
+  const failures = await settleEach(handles, async (handle) => {
+    if (await isListedHandle(admin, handle)) listed.add(handle);
+  });
+  if (failures.length > 0) throw failures[0].error;
+  return listed;
+}
+
+async function isListedHandle(
+  admin: AdminApiContext,
+  handle: string,
+): Promise<boolean> {
+  const { metaobjectByHandle: batch } = await query<{
+    metaobjectByHandle: {
+      id: string;
+      referencedBy: { nodes: { key: string }[] };
+    } | null;
+  }>(
+    admin,
+    `#graphql
+      query FindBatchByHandle($handle: String!) {
+        metaobjectByHandle(
+          handle: { type: "$app:freshness_batch", handle: $handle }
+        ) {
+          id
+          referencedBy(first: 1) {
+            nodes {
+              key
+            }
+          }
+        }
+      }`,
+    { handle },
+  );
+  return batch !== null && batch.referencedBy.nodes.length > 0;
+}
+
+/**
+ * Creates each new batch, or updates the unlinked one with its handle, so a
+ * retried save doesn't duplicate it. Returns ids by handle and the failures.
+ */
+export async function upsertBatches(
+  admin: AdminApiContext,
+  batches: NewBatch[],
+): Promise<{
+  ids: Map<string, string>;
+  failed: { batch: NewBatch; error: unknown }[];
+}> {
+  const ids = new Map<string, string>();
+  const failures = await settleEach(batches, async (batch) => {
+    ids.set(batch.handle, await upsertBatch(admin, batch));
+  });
+  return {
+    ids,
+    failed: failures.map(({ item, error }) => ({ batch: item, error })),
+  };
+}
+
+async function upsertBatch(
+  admin: AdminApiContext,
+  { handle, quantity, expirationDate }: NewBatch,
+): Promise<string> {
+  const data = await query<{
+    metaobjectUpsert:
+      (UserErrorsPayload & { metaobject: { id: string } | null }) | null;
+  }>(
+    admin,
+    `#graphql
+      mutation UpsertBatch(
+        $handle: String!
+        $fields: [MetaobjectFieldInput!]!
+      ) {
+        metaobjectUpsert(
+          handle: { type: "$app:freshness_batch", handle: $handle }
+          metaobject: { fields: $fields }
+        ) {
+          metaobject {
+            id
+          }
+          userErrors {
+            field
+            message
+            code
+          }
+        }
+      }`,
+    {
+      handle,
+      fields: [
+        { key: "quantity", value: String(quantity) },
+        { key: "expiration_date", value: expirationDate },
+      ],
+    },
+  );
+  const result = data.metaobjectUpsert;
+  throwOnUserErrors(`Saving new batch ${handle}`, result?.userErrors);
+  if (!result?.metaobject) {
+    throw new PermanentShopifyError(
+      `Saving new batch ${handle} returned no id`,
+    );
+  }
+  return result.metaobject.id;
+}
+
+/**
+ * Writes the batch list only if it's still the one read: `compareDigest` is
+ * the digest read, or null when the product had no list.
+ *
+ * @throws BatchListChangedError if the list changed since
+ */
+export async function saveBatchList(
+  admin: AdminApiContext,
+  productId: string,
+  batchIds: string[],
+  compareDigest: string | null,
+): Promise<void> {
+  const data = await query<{ metafieldsSet: UserErrorsPayload | null }>(
+    admin,
+    `#graphql
+      mutation SaveBatchList(
+        $productId: ID!
+        $value: String!
+        $compareDigest: String
+      ) {
+        metafieldsSet(
+          metafields: [
+            {
+              ownerId: $productId
+              key: "freshness_batches"
+              value: $value
+              compareDigest: $compareDigest
+            }
+          ]
+        ) {
+          userErrors {
+            field
+            message
+            code
+          }
+        }
+      }`,
+    // An explicit null, not undefined: a missing digest would skip the check
+    { productId, value: JSON.stringify(batchIds), compareDigest },
+  );
+  const errors = data.metafieldsSet?.userErrors ?? [];
+  if (errors.some(({ code }) => code === "STALE_OBJECT")) {
+    throw new BatchListChangedError(
+      `Product ${productId}'s batch list changed since it was read`,
+    );
+  }
+  throwOnUserErrors(`Saving product ${productId} batch list`, errors);
+}
+
+/** Deletes each batch, settling them all. Returns the ids that failed. */
+export async function deleteBatches(
+  admin: AdminApiContext,
+  ids: string[],
+): Promise<string[]> {
+  const failures = await settleEach(ids, (id) => deleteBatch(admin, id));
+  return failures.map(({ item }) => item);
 }
 
 // Enough to overlap round trips without spending Shopify's rate limit at once

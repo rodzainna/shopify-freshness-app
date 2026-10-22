@@ -13,6 +13,10 @@ interface FakeProduct {
 
 type Variables = Record<string, unknown>;
 
+// Changes whenever the stored list does, like Shopify's compareDigest
+export const listDigest = (batchIds: string[]) =>
+  `digest:${JSON.stringify(batchIds)}`;
+
 /**
  * An in-memory store answering the app's fulfillment GraphQL operations, so
  * tests can check what Shopify ends up holding after failures and retries.
@@ -22,6 +26,11 @@ type Variables = Record<string, unknown>;
 export function fakeShopify({ delayMs = 0 } = {}) {
   const products = new Map<string, FakeProduct>();
   const batches = new Map<string, FakeBatch>();
+  // Handle → id, for batches created by handle
+  const handles = new Map<string, string>();
+  let nextBatchNumber = 1000;
+  const isListed = (id: string) =>
+    [...products.values()].some(({ batchIds }) => batchIds?.includes(id));
   const calls: string[] = [];
   // Operation name → how many more calls should fail before succeeding
   const failures = new Map<string, number>();
@@ -33,6 +42,8 @@ export function fakeShopify({ delayMs = 0 } = {}) {
     SetBatchFields: "metaobjectUpdate",
     SaveProductFreshness: "metafieldsSet",
     DeleteBatch: "metaobjectDelete",
+    UpsertBatch: "metaobjectUpsert",
+    SaveBatchList: "metafieldsSet",
   };
 
   const userError = (message: string, code: string) => ({
@@ -55,6 +66,7 @@ export function fakeShopify({ delayMs = 0 } = {}) {
         product: {
           earliestExpiration,
           freshnessBatches: {
+            compareDigest: listDigest(product.batchIds),
             references: {
               // A batch that isn't stored comes back as null, like Shopify
               nodes: product.batchIds.map((id) => {
@@ -107,6 +119,48 @@ export function fakeShopify({ delayMs = 0 } = {}) {
         else product.earliestExpirationDate = null;
       }
       return { metafieldsSet: ok, metafieldsDelete: ok };
+    },
+    FindBatchByHandle: ({ handle }) => {
+      const id = handles.get(handle as string);
+      if (!id || !batches.has(id)) return { metaobjectByHandle: null };
+      return {
+        metaobjectByHandle: {
+          id,
+          referencedBy: {
+            nodes: isListed(id) ? [{ key: "freshness_batches" }] : [],
+          },
+        },
+      };
+    },
+    UpsertBatch: ({ handle, fields }) => {
+      const values = Object.fromEntries(
+        (fields as { key: string; value: string }[]).map(({ key, value }) => [
+          key,
+          value,
+        ]),
+      );
+      const existing = handles.get(handle as string);
+      const id = existing ?? `gid://shopify/Metaobject/${nextBatchNumber++}`;
+      handles.set(handle as string, id);
+      batches.set(id, {
+        quantity: Number(values.quantity),
+        expirationDate: values.expiration_date,
+      });
+      return { metaobjectUpsert: { metaobject: { id }, ...ok } };
+    },
+    SaveBatchList: ({ productId, value, compareDigest }) => {
+      const product = products.get(productId as string)!;
+      const digest = product.batchIds ? listDigest(product.batchIds) : null;
+      if (compareDigest !== digest) {
+        return {
+          metafieldsSet: userError(
+            "The metafield has been modified since it was loaded.",
+            "STALE_OBJECT",
+          ),
+        };
+      }
+      product.batchIds = JSON.parse(value as string);
+      return { metafieldsSet: ok };
     },
     DeleteBatch: ({ id }) => {
       if (!batches.delete(id as string)) {
@@ -178,6 +232,11 @@ export function fakeShopify({ delayMs = 0 } = {}) {
     },
     product: (productId: string) => products.get(productId),
     batch: (id: string) => batches.get(id),
+    batchIdByHandle: (handle: string) => handles.get(handle),
+    // Gives a stored batch the handle it was created under
+    setHandle(id: string, handle: string) {
+      handles.set(handle, id);
+    },
     setQuantity(id: string, quantity: number) {
       batches.get(id)!.quantity = quantity;
     },
