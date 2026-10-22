@@ -51,9 +51,55 @@ describe("app/batches", () => {
     expect(shopify.batch(BATCH)?.quantity).toBe(5);
   });
 
+  it("adds a new batch", async () => {
+    const shopify = setup();
+    const handle = "3f2b8c1e-9d4a-4b7e-8f6a-2c1d0e9b8a7f";
+
+    expect(
+      await post({
+        productId,
+        opened,
+        edited: opened,
+        added: [{ handle, quantity: 2, expirationDate: "2026-11-01" }],
+      }),
+    ).toMatchObject({ kind: "saved", failedNew: [] });
+    expect(shopify.product(productId)?.batchIds).toStrictEqual([
+      BATCH,
+      shopify.batchIdByHandle(handle),
+    ]);
+  });
+
+  it("refuses a new batch whose handle a listed batch already uses", async () => {
+    const shopify = setup();
+    const handle = "3f2b8c1e-9d4a-4b7e-8f6a-2c1d0e9b8a7f";
+    shopify.setHandle(BATCH, handle);
+
+    const response = (await post({
+      productId,
+      opened,
+      edited: opened,
+      added: [{ handle, quantity: 2, expirationDate: "2026-11-01" }],
+    })) as Response;
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      message: "A new batch's handle is already used by another batch",
+    });
+  });
+
   it.each([
     ["a body that isn't JSON", "not json", "Invalid request."],
     ["a malformed body", { productId, opened }, "Invalid request."],
+    [
+      "a new batch with a bad handle",
+      {
+        productId,
+        opened,
+        edited: opened,
+        added: [{ handle: "1", quantity: 1, expirationDate: "2026-11-01" }],
+      },
+      "Invalid request.",
+    ],
     [
       "edits that don't match what was opened",
       { productId, opened, edited: [] },

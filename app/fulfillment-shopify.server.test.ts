@@ -1,12 +1,18 @@
 import { describe, it, expect } from "vitest";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import {
+  BatchListChangedError,
   PermanentShopifyError,
   applyPlan,
+  deleteBatches,
+  findBatchHandles,
   readProductBatches,
   readShopToday,
+  saveBatchList,
+  upsertBatches,
 } from "./fulfillment-shopify.server";
 import type { FulfillmentPlanData } from "../shared/fulfillment-plan";
+import { fakeShopify, listDigest } from "../test/fake-shopify";
 
 const productId = "gid://shopify/Product/1";
 
@@ -65,7 +71,10 @@ describe("readShopToday", () => {
 describe("readProductBatches", () => {
   const batchesResponse = (nodes: unknown[], hasNextPage = false) => ({
     product: {
-      freshnessBatches: { references: { nodes, pageInfo: { hasNextPage } } },
+      freshnessBatches: {
+        compareDigest: "digest-1",
+        references: { nodes, pageInfo: { hasNextPage } },
+      },
     },
   });
 
@@ -90,6 +99,7 @@ describe("readProductBatches", () => {
         },
       ],
       earliestExpirationDate: null,
+      listDigest: "digest-1",
     });
     expect(calls[0].variables).toStrictEqual({ productId, maxBatches: 250 });
   });
@@ -105,6 +115,7 @@ describe("readProductBatches", () => {
         { id: "gid://shopify/Metaobject/1", quantity: 0, expirationDate: "" },
       ],
       earliestExpirationDate: null,
+      listDigest: "digest-1",
     });
   });
 
@@ -126,6 +137,7 @@ describe("readProductBatches", () => {
     expect(await readProductBatches(admin, productId)).toStrictEqual({
       batches: [],
       earliestExpirationDate: null,
+      listDigest: "digest-1",
     });
   });
 
@@ -471,5 +483,181 @@ describe("applyPlan", () => {
     await expect(applyPlan(admin, productId, plan, null)).rejects.toThrow(
       "Deleting batch gid://shopify/Metaobject/1 failed: Not authorized",
     );
+  });
+});
+
+describe("adding batches", () => {
+  const HANDLE = "3f2b8c1e-9d4a-4b7e-8f6a-2c1d0e9b8a7f";
+  const OTHER_HANDLE = "a1b2c3d4-e5f6-4a7b-9c8d-0e1f2a3b4c5d";
+  const LISTED = "gid://shopify/Metaobject/1";
+
+  function setup() {
+    const shopify = fakeShopify();
+    shopify.addProduct(productId, {
+      [LISTED]: { quantity: 6, expirationDate: "2026-10-23" },
+    });
+    return shopify;
+  }
+
+  describe("findBatchHandles", () => {
+    it("tells new, unlinked and linked handles apart", async () => {
+      const shopify = setup();
+      shopify.setHandle(LISTED, OTHER_HANDLE);
+      const { ids } = await upsertBatches(shopify.admin, [
+        { handle: HANDLE, quantity: 1, expirationDate: "2026-11-01" },
+      ]);
+      const NEW = "0b1c2d3e-4f50-4a6b-8c7d-8e9f0a1b2c3d";
+
+      expect(ids.get(HANDLE)).toBeDefined();
+      expect(
+        await findBatchHandles(shopify.admin, [HANDLE, OTHER_HANDLE, NEW]),
+      ).toStrictEqual(
+        new Map([
+          [HANDLE, "unlinked"],
+          [OTHER_HANDLE, "linked"],
+          [NEW, "new"],
+        ]),
+      );
+    });
+  });
+
+  describe("upsertBatches", () => {
+    it("creates each batch and returns its id by handle", async () => {
+      const shopify = setup();
+
+      const { ids, failed } = await upsertBatches(shopify.admin, [
+        { handle: HANDLE, quantity: 3, expirationDate: "2026-11-01" },
+      ]);
+
+      expect(failed).toStrictEqual([]);
+      expect(shopify.batch(ids.get(HANDLE)!)).toEqual({
+        quantity: 3,
+        expirationDate: "2026-11-01",
+      });
+    });
+
+    it("reuses the batch with the same handle instead of duplicating it", async () => {
+      const shopify = setup();
+      const first = await upsertBatches(shopify.admin, [
+        { handle: HANDLE, quantity: 3, expirationDate: "2026-11-01" },
+      ]);
+
+      const retry = await upsertBatches(shopify.admin, [
+        { handle: HANDLE, quantity: 4, expirationDate: "2026-11-02" },
+      ]);
+
+      expect(retry.ids.get(HANDLE)).toBe(first.ids.get(HANDLE));
+      expect(shopify.batch(retry.ids.get(HANDLE)!)).toEqual({
+        quantity: 4,
+        expirationDate: "2026-11-02",
+      });
+    });
+
+    it("lists the batches Shopify rejects and still creates the rest", async () => {
+      const shopify = setup();
+      shopify.rejectNext("UpsertBatch");
+      const rejected = {
+        handle: HANDLE,
+        quantity: 3,
+        expirationDate: "2026-11-01",
+      };
+
+      const { ids, failed } = await upsertBatches(shopify.admin, [
+        rejected,
+        { handle: OTHER_HANDLE, quantity: 5, expirationDate: "2026-11-03" },
+      ]);
+
+      expect(failed.map(({ batch }) => batch)).toStrictEqual([rejected]);
+      expect(failed[0].error).toBeInstanceOf(PermanentShopifyError);
+      expect((failed[0].error as Error).message).toBe(
+        `Saving new batch ${HANDLE} failed: Invalid value`,
+      );
+      expect([...ids.keys()]).toStrictEqual([OTHER_HANDLE]);
+    });
+  });
+
+  describe("saveBatchList", () => {
+    const NEW_ID = "gid://shopify/Metaobject/2";
+
+    it("writes the list when it's still the one read", async () => {
+      const shopify = setup();
+
+      await saveBatchList(
+        shopify.admin,
+        productId,
+        [LISTED, NEW_ID],
+        listDigest([LISTED]),
+      );
+
+      expect(shopify.product(productId)?.batchIds).toStrictEqual([
+        LISTED,
+        NEW_ID,
+      ]);
+    });
+
+    it("creates the list for a product that had none", async () => {
+      const shopify = setup();
+      shopify.addProduct("gid://shopify/Product/2", null);
+
+      await saveBatchList(
+        shopify.admin,
+        "gid://shopify/Product/2",
+        [NEW_ID],
+        null,
+      );
+
+      expect(
+        shopify.product("gid://shopify/Product/2")?.batchIds,
+      ).toStrictEqual([NEW_ID]);
+    });
+
+    it.each([
+      ["the list changed since it was read", listDigest([])],
+      ["a list appeared where there was none", null],
+    ])("refuses when %s", async (_case, digest) => {
+      const shopify = setup();
+
+      await expect(
+        saveBatchList(shopify.admin, productId, [NEW_ID], digest),
+      ).rejects.toThrow(BatchListChangedError);
+      expect(shopify.product(productId)?.batchIds).toStrictEqual([LISTED]);
+    });
+
+    it("sends a null digest explicitly, so Shopify still checks it", async () => {
+      const { admin, calls } = fakeAdmin({
+        SaveBatchList: () => ({ metafieldsSet: noUserErrors }),
+      });
+
+      await saveBatchList(admin, productId, [NEW_ID], null);
+
+      expect(calls[0].variables).toHaveProperty("compareDigest", null);
+    });
+
+    it("throws a permanent error for any other rejection", async () => {
+      const shopify = setup();
+      shopify.rejectNext("SaveBatchList");
+
+      await expect(
+        saveBatchList(shopify.admin, productId, [NEW_ID], listDigest([LISTED])),
+      ).rejects.toThrow(PermanentShopifyError);
+    });
+  });
+
+  describe("deleteBatches", () => {
+    it("deletes each batch and returns the ones that failed", async () => {
+      const shopify = setup();
+      shopify.failNext("DeleteBatch");
+      const { ids } = await upsertBatches(shopify.admin, [
+        { handle: HANDLE, quantity: 1, expirationDate: "2026-11-01" },
+        { handle: OTHER_HANDLE, quantity: 2, expirationDate: "2026-11-02" },
+      ]);
+      const [first, second] = [ids.get(HANDLE)!, ids.get(OTHER_HANDLE)!];
+
+      expect(await deleteBatches(shopify.admin, [first, second])).toStrictEqual(
+        [first],
+      );
+      expect(shopify.batch(first)).toBeDefined();
+      expect(shopify.batch(second)).toBeUndefined();
+    });
   });
 });

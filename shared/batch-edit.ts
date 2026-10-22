@@ -56,17 +56,23 @@ export type BatchEditRequest = {
   productId: string;
   opened: EditableBatch[];
   edited: EditableBatch[];
+  added: NewBatch[];
 };
+
+// Batch ids are Shopify GIDs, so they can never equal a new batch's UUID handle
+const METAOBJECT_GID = /^gid:\/\/shopify\/Metaobject\/\d+$/;
 
 /** The editor's request body, or null when it isn't shaped like one. */
 export function parseBatchEditRequest(body: unknown): BatchEditRequest | null {
   if (!isRecord(body)) return null;
-  const { productId, opened, edited } = body;
+  const { productId, opened, edited, added = [] } = body;
   if (typeof productId !== "string" || !PRODUCT_GID.test(productId)) {
     return null;
   }
-  if (!isBatchList(opened) || !isBatchList(edited)) return null;
-  return { productId, opened, edited };
+  if (!isBatchList(opened) || !isBatchList(edited) || !isNewBatchList(added)) {
+    return null;
+  }
+  return { productId, opened, edited, added };
 }
 
 function isBatchList(value: unknown): value is EditableBatch[] {
@@ -76,9 +82,29 @@ function isBatchList(value: unknown): value is EditableBatch[] {
       (batch) =>
         isRecord(batch) &&
         typeof batch.id === "string" &&
-        typeof batch.quantity === "number" &&
-        typeof batch.expirationDate === "string",
+        METAOBJECT_GID.test(batch.id) &&
+        hasBatchValues(batch),
     )
+  );
+}
+
+function isNewBatchList(value: unknown): value is NewBatch[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (batch) =>
+        isRecord(batch) &&
+        typeof batch.handle === "string" &&
+        hasBatchValues(batch),
+    ) &&
+    uniqueUuidHandles(value)
+  );
+}
+
+function hasBatchValues(batch: Record<string, unknown>): boolean {
+  return (
+    typeof batch.quantity === "number" &&
+    typeof batch.expirationDate === "string"
   );
 }
 

@@ -61,6 +61,7 @@ describe("editBatches", () => {
         opened[1],
       ],
       failed: [],
+      failedNew: [],
       dateFailed: false,
     });
     expect(shopify.batch(SOON)).toEqual({
@@ -75,6 +76,23 @@ describe("editBatches", () => {
       "SetBatchFields",
       "SaveProductFreshness",
     ]);
+  });
+
+  it("treats a product without a batch list as empty", async () => {
+    const { shopify } = setup();
+    const emptyProduct = "gid://shopify/Product/2";
+    shopify.addProduct(emptyProduct, null);
+
+    const result = await editBatches({
+      admin: shopify.admin,
+      shop,
+      productId: emptyProduct,
+      opened: [],
+      edited: [],
+    });
+
+    expect(result).toStrictEqual({ kind: "unchanged", batches: [] });
+    expect(writes(shopify.calls)).toStrictEqual([]);
   });
 
   it("doesn't rewrite an earliest date that's still right", async () => {
@@ -250,6 +268,203 @@ describe("editBatches", () => {
   });
 });
 
+describe("editBatches adding batches", () => {
+  const HANDLE = "3f2b8c1e-9d4a-4b7e-8f6a-2c1d0e9b8a7f";
+  const OTHER_HANDLE = "a1b2c3d4-e5f6-4a7b-9c8d-0e1f2a3b4c5d";
+  const fresh = (handle = HANDLE, quantity = 3) => ({
+    handle,
+    quantity,
+    expirationDate: "2026-10-20",
+  });
+
+  const add = (
+    shopify: ReturnType<typeof fakeShopify>,
+    added: ReturnType<typeof fresh>[],
+    edited = opened,
+  ) =>
+    editBatches({
+      admin: shopify.admin,
+      shop,
+      productId,
+      opened,
+      edited,
+      added,
+    });
+
+  // Runs `effect` just before the named operation reaches Shopify
+  function before(
+    shopify: ReturnType<typeof fakeShopify>,
+    operation: string,
+    effect: () => void,
+  ) {
+    const graphql = shopify.admin.graphql;
+    shopify.admin.graphql = ((query: string, options?: object) => {
+      if (query.includes(`${operation}(`)) effect();
+      return graphql(query, options);
+    }) as typeof graphql;
+  }
+
+  it("adds a batch to a product that has none", async () => {
+    const { shopify } = setup();
+    const empty = "gid://shopify/Product/2";
+    shopify.addProduct(empty, null);
+
+    const result = await editBatches({
+      admin: shopify.admin,
+      shop,
+      productId: empty,
+      opened: [],
+      edited: [],
+      added: [fresh()],
+    });
+
+    const id = shopify.batchIdByHandle(HANDLE)!;
+    expect(result).toStrictEqual({
+      kind: "saved",
+      batches: [{ id, quantity: 3, expirationDate: "2026-10-20" }],
+      failed: [],
+      failedNew: [],
+      dateFailed: false,
+    });
+    expect(shopify.product(empty)).toEqual({
+      batchIds: [id],
+      earliestExpirationDate: "2026-10-20",
+    });
+  });
+
+  it("links new batches before writing edits, then the date", async () => {
+    const { shopify } = setup();
+
+    await add(shopify, [fresh()], [{ ...opened[0], quantity: 5 }, opened[1]]);
+
+    expect(writes(shopify.calls)).toStrictEqual([
+      "FindBatchByHandle",
+      "UpsertBatch",
+      "SaveBatchList",
+      "SetBatchFields",
+      "SaveProductFreshness",
+    ]);
+    expect(shopify.product(productId)).toEqual({
+      batchIds: [SOON, LATER, shopify.batchIdByHandle(HANDLE)],
+      earliestExpirationDate: "2026-10-20",
+    });
+    expect(shopify.batch(SOON)?.quantity).toBe(5);
+  });
+
+  it("removes the new batch and writes nothing else when the list changed meanwhile", async () => {
+    const { shopify } = setup();
+    const PANEL = "gid://shopify/Metaobject/panel";
+    shopify.addProduct("gid://shopify/Product/9", {
+      [PANEL]: { quantity: 1, expirationDate: "2026-12-01" },
+    });
+    // The panel doesn't take the app's lock, so it can save mid-request
+    before(shopify, "metafieldsSet", () => {
+      shopify.product(productId)!.batchIds!.push(PANEL);
+    });
+
+    const result = await add(
+      shopify,
+      [fresh()],
+      [{ ...opened[0], quantity: 5 }, opened[1]],
+    );
+
+    expect(result).toStrictEqual({
+      kind: "changed",
+      batches: [
+        ...opened,
+        { id: PANEL, quantity: 1, expirationDate: "2026-12-01" },
+      ],
+    });
+    expect(shopify.batch(shopify.batchIdByHandle(HANDLE)!)).toBeUndefined();
+    expect(shopify.batch(SOON)?.quantity).toBe(6);
+    expect(writes(shopify.calls)).not.toContain("SetBatchFields");
+  });
+
+  it("refuses a handle that a listed batch already uses, writing nothing", async () => {
+    const { shopify } = setup();
+    shopify.setHandle(SOON, HANDLE);
+
+    await expect(add(shopify, [fresh()])).rejects.toThrow(
+      "A new batch's handle is already used by another batch",
+    );
+    expect(writes(shopify.calls)).toStrictEqual(["FindBatchByHandle"]);
+    expect(shopify.batch(SOON)?.quantity).toBe(6);
+  });
+
+  it("reuses a new batch left unlinked by a failed save", async () => {
+    const { shopify } = setup();
+    shopify.failNext("SaveBatchList");
+
+    await expect(add(shopify, [fresh()])).rejects.toThrow(
+      "Simulated network failure",
+    );
+    const leftover = shopify.batchIdByHandle(HANDLE);
+    const retry = await add(shopify, [fresh()]);
+
+    expect(retry).toMatchObject({ kind: "saved", failedNew: [] });
+    expect(shopify.product(productId)?.batchIds).toStrictEqual([
+      SOON,
+      LATER,
+      leftover,
+    ]);
+  });
+
+  it("links the new batches that were created and reports the rest", async () => {
+    const { shopify } = setup();
+    shopify.rejectNext("UpsertBatch");
+
+    const result = await add(shopify, [fresh(), fresh(OTHER_HANDLE, 4)]);
+
+    // Upserts run together, so either one can be the rejected one
+    const { failedNew } = result as { failedNew: string[] };
+    expect(failedNew).toHaveLength(1);
+    const createdHandle = failedNew[0] === HANDLE ? OTHER_HANDLE : HANDLE;
+    expect(shopify.product(productId)?.batchIds).toStrictEqual([
+      SOON,
+      LATER,
+      shopify.batchIdByHandle(createdHandle),
+    ]);
+  });
+
+  it("writes no list when no new batch could be created", async () => {
+    const { shopify } = setup();
+    shopify.rejectNext("UpsertBatch");
+
+    const result = await add(shopify, [fresh()]);
+
+    expect(result).toMatchObject({ kind: "saved", failedNew: [HANDLE] });
+    expect(writes(shopify.calls)).not.toContain("SaveBatchList");
+    expect(shopify.product(productId)?.batchIds).toStrictEqual([SOON, LATER]);
+  });
+
+  it("refuses to go over the batch limit, writing nothing", async () => {
+    const shopify = fakeShopify();
+    const many = Object.fromEntries(
+      Array.from({ length: 250 }, (_, index) => [
+        `gid://shopify/Metaobject/${index}`,
+        { quantity: 1, expirationDate: "2026-11-01" },
+      ]),
+    );
+    shopify.addProduct(productId, many);
+    const full = Object.entries(many).map(([id, batch]) => ({ id, ...batch }));
+
+    const result = await editBatches({
+      admin: shopify.admin,
+      shop,
+      productId,
+      opened: full,
+      edited: full,
+      added: [fresh()],
+    });
+
+    expect(result).toStrictEqual({
+      kind: "unavailable",
+      message: "A product can have at most 250 batches.",
+    });
+    expect(writes(shopify.calls)).toStrictEqual([]);
+  });
+});
+
 describe("loadBatches", () => {
   it("reads the product's batches", async () => {
     const { shopify } = setup();
@@ -280,12 +495,12 @@ describe("loadBatches", () => {
     });
   });
 
-  it("explains a product without batches", async () => {
+  it("opens a product without a batch list as empty, so batches can be added", async () => {
     const { shopify } = setup();
     shopify.addProduct("gid://shopify/Product/2", null);
 
     expect(
       await loadBatches(shopify.admin, "gid://shopify/Product/2"),
-    ).toStrictEqual({ message: "This product has no batches." });
+    ).toStrictEqual({ batches: [], earliestExpirationDate: null });
   });
 });

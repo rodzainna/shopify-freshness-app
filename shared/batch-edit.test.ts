@@ -250,14 +250,33 @@ describe("applyEdits", () => {
 });
 
 describe("parseBatchEditRequest", () => {
+  const stored = [
+    loaf("gid://shopify/Metaobject/1", 6, "2026-10-23"),
+    loaf("gid://shopify/Metaobject/2", 12, "2026-10-28"),
+  ];
+  const added = [fresh(HANDLE, 3, "2026-11-01")];
   const body = {
     productId: "gid://shopify/Product/1",
-    opened,
-    edited: opened,
+    opened: stored,
+    edited: stored,
+    added,
   };
 
   it("accepts a well-formed request", () => {
     expect(parseBatchEditRequest(body)).toStrictEqual(body);
+  });
+
+  it("reads a request without new batches as adding none", () => {
+    const withoutAdded = {
+      productId: body.productId,
+      opened: stored,
+      edited: stored,
+    };
+
+    expect(parseBatchEditRequest(withoutAdded)).toStrictEqual({
+      ...withoutAdded,
+      added: [],
+    });
   });
 
   it.each([
@@ -266,12 +285,30 @@ describe("parseBatchEditRequest", () => {
     ["a non-list of batches", { ...body, edited: "x" }],
     [
       "a quantity sent as text",
-      { ...body, edited: [{ ...opened[0], quantity: "6" }] },
+      { ...body, edited: [{ ...stored[0], quantity: "6" }] },
     ],
     [
       "a batch without an id",
       { ...body, opened: [{ quantity: 1, expirationDate: "" }] },
     ],
+    [
+      "a batch id that isn't a Metaobject GID",
+      { ...body, opened: [loaf(HANDLE, 6, "2026-10-23")] },
+    ],
+    ["new batches that aren't a list", { ...body, added: "x" }],
+    [
+      "a new batch without a handle",
+      { ...body, added: [{ quantity: 1, expirationDate: "2026-11-01" }] },
+    ],
+    [
+      "a new batch's quantity sent as text",
+      { ...body, added: [{ ...added[0], quantity: "3" }] },
+    ],
+    [
+      "a new batch handle that isn't a UUID",
+      { ...body, added: [fresh("batch-1", 1, "2026-11-01")] },
+    ],
+    ["a repeated new batch handle", { ...body, added: [...added, ...added] }],
   ])("rejects %s", (_case, value) => {
     expect(parseBatchEditRequest(value)).toBeNull();
   });
