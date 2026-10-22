@@ -22,9 +22,13 @@ export type BatchEditPlan =
   | { kind: "invalid"; errors: Record<string, BatchErrors> }
   // The batches changed since the editor opened, so nothing is written
   | { kind: "changed" }
-  | { kind: "tooMany"; max: number }
+  // Over the batches a product can hold, or that one save may add
+  | { kind: "tooMany"; limit: "product" | "save"; max: number }
   | { kind: "unchanged" }
   | { kind: "write"; updates: EditableBatch[]; additions: NewBatch[] };
+
+// Keeps a save's lookups and creates well inside the product lock's TTL
+export const MAX_NEW_BATCHES_PER_SAVE = 25;
 
 // Lowercase v4 UUIDs, as crypto.randomUUID() makes them
 const BATCH_HANDLE =
@@ -164,8 +168,11 @@ export function planBatchEdit(
   if (Object.keys(errors).length > 0) return { kind: "invalid", errors };
 
   if (!sameBatches(opened, current)) return { kind: "changed" };
+  if (added.length > MAX_NEW_BATCHES_PER_SAVE) {
+    return { kind: "tooMany", limit: "save", max: MAX_NEW_BATCHES_PER_SAVE };
+  }
   if (current.length + added.length > MAX_BATCHES) {
-    return { kind: "tooMany", max: MAX_BATCHES };
+    return { kind: "tooMany", limit: "product", max: MAX_BATCHES };
   }
 
   const openedById = new Map(opened.map((batch) => [batch.id, batch]));

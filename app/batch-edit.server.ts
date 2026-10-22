@@ -5,7 +5,7 @@ import {
   PermanentShopifyError,
   type ProductBatches,
   deleteBatches,
-  findBatchHandles,
+  findListedHandles,
   readProductBatches,
   saveBatchList,
   saveEarliestExpirationDate,
@@ -74,7 +74,8 @@ async function readForEdit(
   try {
     const read = await readProductBatches(admin, productId);
     if ("notTracked" in read) {
-      return { batches: [], earliestExpirationDate: null, listDigest: null };
+      const { earliestExpirationDate } = read;
+      return { batches: [], earliestExpirationDate, listDigest: null };
     }
     if ("batches" in read) return read;
     return { message: unavailableMessage(read) };
@@ -129,7 +130,10 @@ export async function editBatches({
         if (plan.kind === "tooMany") {
           return {
             kind: "unavailable",
-            message: `A product can have at most ${plan.max} batches.`,
+            message:
+              plan.limit === "save"
+                ? `Add up to ${plan.max} batches at a time.`
+                : `A product can have at most ${plan.max} batches.`,
           };
         }
 
@@ -194,8 +198,8 @@ export async function editBatches({
 
 /**
  * Creates the new batches and adds the ones created to the product's list.
- * Other list failures are thrown, leaving the new batches unlinked for a
- * retry to reuse.
+ * A list write that fails without landing is thrown, leaving the new batches
+ * unlinked for a retry to reuse.
  */
 async function addBatches(
   admin: AdminApiContext,
@@ -210,11 +214,11 @@ async function addBatches(
     return { kind: "linked", batches: loaded.batches, failedNew: [] };
   }
 
-  const states = await findBatchHandles(
+  const listed = await findListedHandles(
     admin,
     additions.map(({ handle }) => handle),
   );
-  if ([...states.values()].includes("linked")) {
+  if (listed.size > 0) {
     throw new MismatchedEditsError(
       "A new batch's handle is already used by another batch",
     );
@@ -242,7 +246,16 @@ async function addBatches(
       loaded.listDigest,
     );
   } catch (error) {
-    if (!(error instanceof BatchListChangedError)) throw error;
+    if (!(error instanceof BatchListChangedError)) {
+      // A write that timed out may still have landed
+      const reread = await readForEdit(admin, productId).catch(() => null);
+      const linked = reread && "batches" in reread ? reread.batches : [];
+      const linkedIds = new Set(linked.map(({ id }) => id));
+      if (created.every(({ id }) => linkedIds.has(id))) {
+        return { kind: "linked", batches: linked, failedNew };
+      }
+      throw error;
+    }
     const notDeleted = await deleteBatches(
       admin,
       created.map(({ id }) => id),

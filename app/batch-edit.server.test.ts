@@ -391,6 +391,16 @@ describe("editBatches adding batches", () => {
     expect(shopify.batch(SOON)?.quantity).toBe(6);
   });
 
+  it("stops before any write when a handle can't be checked", async () => {
+    const { shopify } = setup();
+    shopify.failNext("FindBatchByHandle");
+
+    await expect(add(shopify, [fresh()])).rejects.toThrow(
+      "Simulated network failure",
+    );
+    expect(writes(shopify.calls)).toStrictEqual(["FindBatchByHandle"]);
+  });
+
   it("reuses a new batch left unlinked by a failed save", async () => {
     const { shopify } = setup();
     shopify.failNext("SaveBatchList");
@@ -435,6 +445,49 @@ describe("editBatches adding batches", () => {
     expect(result).toMatchObject({ kind: "saved", failedNew: [HANDLE] });
     expect(writes(shopify.calls)).not.toContain("SaveBatchList");
     expect(shopify.product(productId)?.batchIds).toStrictEqual([SOON, LATER]);
+  });
+
+  it("refuses more new batches than a save allows, writing nothing", async () => {
+    const { shopify } = setup();
+    const added = Array.from({ length: 26 }, () => fresh(crypto.randomUUID()));
+
+    expect(await add(shopify, added)).toStrictEqual({
+      kind: "unavailable",
+      message: "Add up to 25 batches at a time.",
+    });
+    expect(writes(shopify.calls)).toStrictEqual([]);
+  });
+
+  it("carries on when the list write landed but its response was lost", async () => {
+    const { shopify } = setup();
+    shopify.loseResponseNext("SaveBatchList");
+
+    const result = await add(shopify, [fresh()]);
+
+    const id = shopify.batchIdByHandle(HANDLE)!;
+    expect(result).toMatchObject({ kind: "saved", failedNew: [] });
+    expect(shopify.product(productId)).toEqual({
+      batchIds: [SOON, LATER, id],
+      earliestExpirationDate: "2026-10-20",
+    });
+  });
+
+  it("clears a leftover earliest date on a product without a list", async () => {
+    const { shopify } = setup();
+    const empty = "gid://shopify/Product/2";
+    shopify.addProduct(empty, null);
+    shopify.product(empty)!.earliestExpirationDate = "2026-10-01";
+
+    const result = await editBatches({
+      admin: shopify.admin,
+      shop,
+      productId: empty,
+      opened: [],
+      edited: [],
+    });
+
+    expect(result).toMatchObject({ kind: "saved", dateFailed: false });
+    expect(shopify.product(empty)?.earliestExpirationDate).toBeNull();
   });
 
   it("refuses to go over the batch limit, writing nothing", async () => {

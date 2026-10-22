@@ -5,7 +5,7 @@ import {
   PermanentShopifyError,
   applyPlan,
   deleteBatches,
-  findBatchHandles,
+  findListedHandles,
   readProductBatches,
   readShopToday,
   saveBatchList,
@@ -126,6 +126,7 @@ describe("readProductBatches", () => {
 
     expect(await readProductBatches(admin, productId)).toStrictEqual({
       notTracked: true,
+      earliestExpirationDate: null,
     });
   });
 
@@ -499,8 +500,8 @@ describe("adding batches", () => {
     return shopify;
   }
 
-  describe("findBatchHandles", () => {
-    it("tells new, unlinked and linked handles apart", async () => {
+  describe("findListedHandles", () => {
+    it("returns only the handles of batches a product lists", async () => {
       const shopify = setup();
       shopify.setHandle(LISTED, OTHER_HANDLE);
       const { ids } = await upsertBatches(shopify.admin, [
@@ -509,15 +510,10 @@ describe("adding batches", () => {
       const NEW = "0b1c2d3e-4f50-4a6b-8c7d-8e9f0a1b2c3d";
 
       expect(ids.get(HANDLE)).toBeDefined();
+      // HANDLE exists but no product lists it, like a failed save's leftover
       expect(
-        await findBatchHandles(shopify.admin, [HANDLE, OTHER_HANDLE, NEW]),
-      ).toStrictEqual(
-        new Map([
-          [HANDLE, "unlinked"],
-          [OTHER_HANDLE, "linked"],
-          [NEW, "new"],
-        ]),
-      );
+        await findListedHandles(shopify.admin, [HANDLE, OTHER_HANDLE, NEW]),
+      ).toStrictEqual(new Set([OTHER_HANDLE]));
     });
   });
 

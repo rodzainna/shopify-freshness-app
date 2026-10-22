@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   type EditableBatch,
   type NewBatch,
+  MAX_NEW_BATCHES_PER_SAVE,
   applyEdits,
   isBatchHandle,
   validateNewBatches,
@@ -156,9 +157,26 @@ describe("planBatchEdit with new batches", () => {
 
     expect(planBatchEdit(many, many, many, added)).toStrictEqual({
       kind: "tooMany",
+      limit: "product",
       max: MAX_BATCHES,
     });
     expect(planBatchEdit(many, many, many, added.slice(1))).toMatchObject({
+      kind: "write",
+    });
+  });
+
+  it("refuses to add more than a save allows", () => {
+    const handles = Array.from({ length: MAX_NEW_BATCHES_PER_SAVE + 1 }, () =>
+      crypto.randomUUID(),
+    );
+    const added = handles.map((handle) => fresh(handle, 1, "2026-11-01"));
+
+    expect(planBatchEdit([], [], [], added)).toStrictEqual({
+      kind: "tooMany",
+      limit: "save",
+      max: MAX_NEW_BATCHES_PER_SAVE,
+    });
+    expect(planBatchEdit([], [], [], added.slice(1))).toMatchObject({
       kind: "write",
     });
   });

@@ -77,7 +77,7 @@ export type ProductBatches =
       // Lets a list write fail instead of overwriting someone else's change
       listDigest: string;
     }
-  | { notTracked: true }
+  | { notTracked: true; earliestExpirationDate: string | null }
   | { problem: "product_not_found" | "too_many_batches" };
 
 export async function readProductBatches(
@@ -117,7 +117,10 @@ export async function readProductBatches(
   );
 
   if (!product) return { problem: "product_not_found" };
-  if (!product.freshnessBatches) return { notTracked: true };
+  const earliestExpirationDate = product.earliestExpiration?.value ?? null;
+  if (!product.freshnessBatches) {
+    return { notTracked: true, earliestExpirationDate };
+  }
   const { references } = product.freshnessBatches;
   // Writing back a list we couldn't fully read would unlink batches, so stop
   if (!references || !references.nodes.every(isReadableBatch)) {
@@ -133,7 +136,7 @@ export async function readProductBatches(
       quantity: Number(node.quantity?.value ?? 0),
       expirationDate: node.expirationDate?.value ?? "",
     })),
-    earliestExpirationDate: product.earliestExpiration?.value ?? null,
+    earliestExpirationDate,
     listDigest: product.freshnessBatches.compareDigest,
   };
 }
@@ -212,30 +215,26 @@ export async function writeBatchValues(
   return failures.map(({ item, error }) => ({ batch: item, error }));
 }
 
-// unlinked: a batch no product lists, left by a save that failed partway
-export type HandleState = "new" | "unlinked" | "linked";
-
-/** Looks up each new batch's handle before anything is written. */
-export async function findBatchHandles(
+/**
+ * The handles that already belong to a batch some product lists. A batch no
+ * product lists is a failed save's leftover, so it isn't included.
+ */
+export async function findListedHandles(
   admin: AdminApiContext,
   handles: string[],
-): Promise<Map<string, HandleState>> {
-  const states = new Map<string, HandleState>();
-  for (let start = 0; start < handles.length; start += MAX_WRITES_IN_FLIGHT) {
-    const group = handles.slice(start, start + MAX_WRITES_IN_FLIGHT);
-    await Promise.all(
-      group.map(async (handle) => {
-        states.set(handle, await findBatchHandle(admin, handle));
-      }),
-    );
-  }
-  return states;
+): Promise<Set<string>> {
+  const listed = new Set<string>();
+  const failures = await settleEach(handles, async (handle) => {
+    if (await isListedHandle(admin, handle)) listed.add(handle);
+  });
+  if (failures.length > 0) throw failures[0].error;
+  return listed;
 }
 
-async function findBatchHandle(
+async function isListedHandle(
   admin: AdminApiContext,
   handle: string,
-): Promise<HandleState> {
+): Promise<boolean> {
   const { metaobjectByHandle: batch } = await query<{
     metaobjectByHandle: {
       id: string;
@@ -258,8 +257,7 @@ async function findBatchHandle(
       }`,
     { handle },
   );
-  if (!batch) return "new";
-  return batch.referencedBy.nodes.length > 0 ? "linked" : "unlinked";
+  return batch !== null && batch.referencedBy.nodes.length > 0;
 }
 
 /**
