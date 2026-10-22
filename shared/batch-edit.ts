@@ -46,8 +46,8 @@ export function validateEdit(batch: Batch): BatchErrors {
 
 // The edits don't cover exactly the opened batches, or a new batch's handle is bad
 export class MismatchedEditsError extends Error {
-  constructor() {
-    super("The edits don't match the batches that were opened");
+  constructor(message = "The edits don't match the batches that were opened") {
+    super(message);
     this.name = "MismatchedEditsError";
   }
 }
@@ -119,7 +119,7 @@ function collectErrors<T extends Batch>(
  * opened batches and `added` its new ones.
  *
  * @throws MismatchedEditsError if `edited` doesn't cover exactly the opened
- *   batches, or `added` has a handle that's repeated, not a UUID, or an opened id
+ *   batches, or `added` has a handle that's repeated or not a UUID
  */
 export function planBatchEdit(
   opened: EditableBatch[],
@@ -127,8 +127,11 @@ export function planBatchEdit(
   edited: EditableBatch[],
   added: NewBatch[] = [],
 ): BatchEditPlan {
-  if (!sameIds(opened, edited) || !validHandles(opened, added)) {
-    throw new MismatchedEditsError();
+  if (!sameIds(opened, edited)) throw new MismatchedEditsError();
+  if (!uniqueUuidHandles(added)) {
+    throw new MismatchedEditsError(
+      "Each new batch needs its own lowercase UUID handle",
+    );
   }
 
   const errors = { ...validateEdits(edited), ...validateNewBatches(added) };
@@ -144,20 +147,17 @@ export function planBatchEdit(
     (batch) => !sameValues(batch, openedById.get(batch.id)!),
   );
   return updates.length > 0 || added.length > 0
-    ? { kind: "write", updates, additions: added }
+    ? { kind: "write", updates, additions: [...added] }
     : { kind: "unchanged" };
 }
 
-// Unique, and never an opened id, so the two can share one errors record
-function validHandles(opened: EditableBatch[], added: NewBatch[]): boolean {
-  const openedIds = new Set(opened.map(({ id }) => id));
-  const handles = new Set(added.map(({ handle }) => handle));
-  return (
-    handles.size === added.length &&
-    [...handles].every(
-      (handle) => isBatchHandle(handle) && !openedIds.has(handle),
-    )
-  );
+function uniqueUuidHandles(added: NewBatch[]): boolean {
+  const seen = new Set<string>();
+  for (const { handle } of added) {
+    if (seen.has(handle) || !isBatchHandle(handle)) return false;
+    seen.add(handle);
+  }
+  return true;
 }
 
 /** The batches once `written` has been applied to `current`. */

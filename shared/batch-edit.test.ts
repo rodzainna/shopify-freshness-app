@@ -169,13 +169,18 @@ describe("planBatchEdit with new batches", () => {
       [fresh(HANDLE, 1, "2026-11-01"), fresh(HANDLE, 2, "2026-11-02")],
     ],
     ["has a handle that isn't a UUID", [fresh("batch-1", 1, "2026-11-01")]],
-    ["reuse an opened batch's id", [fresh(HANDLE, 1, "2026-11-01")]],
   ])("throws when the new batches %s", (_case, added) => {
-    const withUuidId = [...opened, loaf(HANDLE, 2, "2026-10-30")];
+    expect(() => planBatchEdit(opened, opened, opened, added)).toThrow(
+      "Each new batch needs its own lowercase UUID handle",
+    );
+  });
 
-    expect(() =>
-      planBatchEdit(withUuidId, withUuidId, withUuidId, added),
-    ).toThrow("The edits don't match the batches that were opened");
+  it("returns its own copy of the new batches", () => {
+    const added = [fresh(HANDLE, 1, "2026-11-01")];
+    const plan = planBatchEdit(opened, opened, opened, added);
+    added.pop();
+
+    expect(plan).toMatchObject({ additions: [fresh(HANDLE, 1, "2026-11-01")] });
   });
 });
 
