@@ -22,7 +22,9 @@ export const SORTS = {
   stock: "Stock: low to high",
   "stock-desc": "Stock: high to low",
   type: "Type A–Z",
+  "type-desc": "Type Z–A",
   vendor: "Vendor A–Z",
+  "vendor-desc": "Vendor Z–A",
 } as const;
 
 export type StatusFilter = keyof typeof STATUS_FILTERS;
@@ -30,6 +32,16 @@ export type StockFilter = keyof typeof STOCK_FILTERS;
 export type DashboardSort = keyof typeof SORTS;
 
 export const DEFAULT_SORT: DashboardSort = "title";
+
+/** The URL's sort, or the default when it's missing or unknown. */
+export function parseSort(params: URLSearchParams): DashboardSort {
+  return (
+    params
+      .getAll(SORT_PARAM)
+      .map((value) => value.trim())
+      .find(isDashboardSort) ?? DEFAULT_SORT
+  );
+}
 
 export function isDashboardSort(value: string): value is DashboardSort {
   return isKnown(SORTS, value);
@@ -87,7 +99,7 @@ export function parseDashboardFilters(
     statuses: known(FILTER_PARAMS.status, STATUS_FILTERS),
     stock: known(FILTER_PARAMS.stock, STOCK_FILTERS),
     tracked: params.get(FILTER_PARAMS.tracked) === "1",
-    sort: known(SORT_PARAM, SORTS)[0] ?? DEFAULT_SORT,
+    sort: parseSort(params),
   };
 }
 
@@ -103,7 +115,9 @@ const PRODUCT_SORTS = {
   stock: { sortKey: "INVENTORY_TOTAL", reverse: false },
   "stock-desc": { sortKey: "INVENTORY_TOTAL", reverse: true },
   type: { sortKey: "PRODUCT_TYPE", reverse: false },
+  "type-desc": { sortKey: "PRODUCT_TYPE", reverse: true },
   vendor: { sortKey: "VENDOR", reverse: false },
+  "vendor-desc": { sortKey: "VENDOR", reverse: true },
 } as const satisfies Record<DashboardSort, ProductSort>;
 
 /** The products query's sortKey and reverse for a sort. */

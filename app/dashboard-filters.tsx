@@ -16,7 +16,7 @@ import {
   applySort,
   clearFilters,
   isDashboardSort,
-  parseDashboardFilters,
+  parseSort,
 } from "../shared/dashboard-filters";
 import type { FilterOptions } from "./routes/app.filter-options";
 
@@ -45,11 +45,11 @@ export function useDashboardFilters(filters: DashboardFilters) {
   const latestSearch = useRef(location.search);
   latestSearch.current = navigation.location?.search ?? location.search;
 
+  // From the newest URL, so a sort still loading shows as chosen
+  const sort = parseSort(new URLSearchParams(latestSearch.current));
+
   const [text, setText] = useState(filters.search);
   const timer = useRef<ReturnType<typeof setTimeout>>();
-  // A sort picked in the last moment, before its navigation starts
-  const [sortDraft, setSortDraft] = useState<DashboardSort | null>(null);
-  const sortTimer = useRef<ReturnType<typeof setTimeout>>();
 
   // Follow the URL (Back, Clear filters), but keep what's typed when it matches
   useEffect(() => {
@@ -59,13 +59,7 @@ export function useDashboardFilters(filters: DashboardFilters) {
     );
   }, [filters.search]);
 
-  useEffect(
-    () => () => {
-      clearTimeout(timer.current);
-      clearTimeout(sortTimer.current);
-    },
-    [],
-  );
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   function update(change: UpdateParams, replace = false) {
     const params = new URLSearchParams(latestSearch.current);
@@ -94,15 +88,8 @@ export function useDashboardFilters(filters: DashboardFilters) {
     });
   }
 
-  // Waits like search, so arrowing through the choices loads only the last one
-  function setSort(sort: DashboardSort) {
-    setSortDraft(sort);
-    clearTimeout(sortTimer.current);
-    sortTimer.current = setTimeout(() => {
-      sortTimer.current = undefined;
-      setSortDraft(null);
-      update((params) => applySort(params, sort));
-    }, SEARCH_DELAY_MS);
+  function setSort(next: DashboardSort) {
+    if (next !== sort) update((params) => applySort(params, next));
   }
 
   function clearAll() {
@@ -112,11 +99,6 @@ export function useDashboardFilters(filters: DashboardFilters) {
     setText("");
     update(clearFilters);
   }
-
-  // From the newest URL, so a cancelled navigation can't leave a stale sort shown
-  const sort =
-    sortDraft ??
-    parseDashboardFilters(new URLSearchParams(latestSearch.current)).sort;
 
   return { text, sort, search, setFilter, setSort, clearAll };
 }
@@ -198,7 +180,6 @@ export function DashboardFilterBar({
 
 const SORT_POPOVER_ID = "sort-popover";
 
-// Applies a choice at once; the popover stays open until a click outside
 function SortButton({
   sort,
   onSort,
@@ -206,7 +187,7 @@ function SortButton({
   sort: DashboardSort;
   onSort: (sort: DashboardSort) => void;
 }) {
-  const choiceList = useLiveProperty("s-choice-list", "values", [sort]);
+  const [draft, setDraft] = useState<string[]>([sort]);
 
   return (
     <>
@@ -214,27 +195,23 @@ function SortButton({
         icon="sort"
         commandFor={SORT_POPOVER_ID}
         accessibilityLabel={`Sort: ${SORTS[sort]}`}
+        // Start from what's applied, dropping a choice from a dismissed popover
+        onClick={() => setDraft([sort])}
       >
         {SORTS[sort]}
       </s-button>
-      <s-popover id={SORT_POPOVER_ID}>
-        <s-box padding="base">
-          <s-choice-list
-            ref={choiceList}
-            label="Sort by"
-            onChange={(event) => {
-              const [value] = event.currentTarget.values;
-              if (value && isDashboardSort(value)) onSort(value);
-            }}
-          >
-            {SORT_OPTIONS.map((option) => (
-              <s-choice key={option.value} value={option.value}>
-                {option.label}
-              </s-choice>
-            ))}
-          </s-choice-list>
-        </s-box>
-      </s-popover>
+      <ChoicePopover
+        id={SORT_POPOVER_ID}
+        label="Sort by"
+        showLabel
+        choices={SORT_OPTIONS}
+        draft={draft}
+        onDraft={setDraft}
+        onApply={() => {
+          const [value] = draft;
+          if (value && isDashboardSort(value)) onSort(value);
+        }}
+      />
     </>
   );
 }
@@ -256,7 +233,6 @@ function FilterButton({
   onApply: (values: string[]) => void;
 }) {
   const [draft, setDraft] = useState(selected);
-  const choiceList = useLiveProperty("s-choice-list", "values", draft);
   // Keep selected values that aren't in the list (renamed, or past its limit) so they can be unticked
   const listed = new Set(options?.map(({ value }) => value));
   const choices = [
@@ -279,46 +255,83 @@ function FilterButton({
           selected.map((value) => labelOf(choices, value)),
         )}
       </s-button>
-      <s-popover id={id}>
-        <s-box padding="base">
-          <s-stack gap="base">
-            {options === undefined && (
-              <s-spinner accessibilityLabel="Loading" />
-            )}
-            <s-choice-list
-              ref={choiceList}
-              label={label}
-              labelAccessibilityVisibility="exclusive"
-              multiple
-              onChange={(event) => setDraft([...event.currentTarget.values])}
+      <ChoicePopover
+        id={id}
+        label={label}
+        choices={choices}
+        loading={options === undefined}
+        multiple
+        draft={draft}
+        onDraft={setDraft}
+        onApply={() => onApply(draft)}
+        onClear={() => onApply([])}
+      />
+    </>
+  );
+}
+
+// A choice list that applies only on Apply, so moving through it loads nothing
+function ChoicePopover({
+  id,
+  label,
+  showLabel = false,
+  choices,
+  loading = false,
+  multiple = false,
+  draft,
+  onDraft,
+  onApply,
+  onClear,
+}: {
+  id: string;
+  label: string;
+  showLabel?: boolean;
+  choices: Option[];
+  loading?: boolean;
+  multiple?: boolean;
+  draft: string[];
+  onDraft: (values: string[]) => void;
+  onApply: () => void;
+  onClear?: () => void;
+}) {
+  const choiceList = useLiveProperty("s-choice-list", "values", draft);
+
+  return (
+    <s-popover id={id}>
+      <s-box padding="base">
+        <s-stack gap="base">
+          {loading && <s-spinner accessibilityLabel="Loading" />}
+          <s-choice-list
+            ref={choiceList}
+            label={label}
+            labelAccessibilityVisibility={showLabel ? undefined : "exclusive"}
+            multiple={multiple || undefined}
+            onChange={(event) => onDraft([...event.currentTarget.values])}
+          >
+            {choices.map((choice) => (
+              <s-choice key={choice.value} value={choice.value}>
+                {choice.label}
+              </s-choice>
+            ))}
+          </s-choice-list>
+          <s-stack direction="inline" gap="small-200">
+            <s-button
+              variant="primary"
+              commandFor={id}
+              command="--hide"
+              onClick={onApply}
             >
-              {choices.map((choice) => (
-                <s-choice key={choice.value} value={choice.value}>
-                  {choice.label}
-                </s-choice>
-              ))}
-            </s-choice-list>
-            <s-stack direction="inline" gap="small-200">
-              <s-button
-                variant="primary"
-                commandFor={id}
-                command="--hide"
-                onClick={() => onApply(draft)}
-              >
-                Apply
-              </s-button>
-              <s-button
-                commandFor={id}
-                command="--hide"
-                onClick={() => onApply([])}
-              >
+              Apply
+            </s-button>
+            {onClear && (
+              <s-button commandFor={id} command="--hide" onClick={onClear}>
                 Clear
               </s-button>
-            </s-stack>
+            )}
           </s-stack>
-        </s-box>
-      </s-popover>
-    </>
+        </s-stack>
+      </s-box>
+    </s-popover>
   );
 }
 

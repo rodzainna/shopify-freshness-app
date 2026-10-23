@@ -95,7 +95,9 @@ describe("toProductSort", () => {
     ["stock", "INVENTORY_TOTAL", false],
     ["stock-desc", "INVENTORY_TOTAL", true],
     ["type", "PRODUCT_TYPE", false],
+    ["type-desc", "PRODUCT_TYPE", true],
     ["vendor", "VENDOR", false],
+    ["vendor-desc", "VENDOR", true],
   ] as const)("sorts %s by %s, reversed: %s", (sort, sortKey, reverse) => {
     expect(toProductSort(sort)).toStrictEqual({ sortKey, reverse });
   });
