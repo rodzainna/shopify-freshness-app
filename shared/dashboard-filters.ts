@@ -1,4 +1,5 @@
 import { type DashboardRow, UNREADABLE } from "./dashboard";
+import { addDays, isCalendarDate } from "./freshness";
 
 // URL values for the status filter, in the order the choices are listed
 export const STATUS_FILTERS = {
@@ -13,6 +14,14 @@ export const STOCK_FILTERS = {
   over: "Over stock",
   // Matches the badge, which only products with batches get
   unbatched: "Unbatched (has batches)",
+} as const;
+
+// URL values for the expiry presets, in the order they're listed
+export const EXPIRY_PRESETS = {
+  expired: "Already expired",
+  today: "Today",
+  "7d": "Next 7 days",
+  "30d": "Next 30 days",
 } as const;
 
 // URL values for the sort, in the order they're listed
@@ -30,8 +39,63 @@ export const SORTS = {
 export type StatusFilter = keyof typeof STATUS_FILTERS;
 export type StockFilter = keyof typeof STOCK_FILTERS;
 export type DashboardSort = keyof typeof SORTS;
+export type ExpiryPreset = keyof typeof EXPIRY_PRESETS;
+
+// Inclusive "YYYY-MM-DD" bounds on the product's earliest in-stock expiry
+export interface ExpiryRange {
+  from: string | null;
+  to: string | null;
+}
+
+export type ExpiryFilter = { preset: ExpiryPreset } | ExpiryRange;
 
 export const DEFAULT_SORT: DashboardSort = "title";
+
+// A preset wins over a custom range; invalid dates are ignored
+function parseExpiry(params: URLSearchParams): ExpiryFilter | null {
+  const preset = params.get(FILTER_PARAMS.expiry)?.trim() ?? "";
+  if (isExpiryPreset(preset)) return { preset };
+  const date = (name: string) => {
+    const value = params.get(name)?.trim() ?? "";
+    return isCalendarDate(value) ? value : null;
+  };
+  const from = date(FILTER_PARAMS.expiryFrom);
+  const to = date(FILTER_PARAMS.expiryTo);
+  if (!from && !to) return null;
+  // A backwards range is taken to mean the same days
+  return from && to && from > to ? { from: to, to: from } : { from, to };
+}
+
+/** Sets the expiry filter in a dashboard URL, or removes it for null. */
+export function applyExpiry(
+  params: URLSearchParams,
+  expiry: ExpiryFilter | null,
+): void {
+  params.delete(FILTER_PARAMS.expiry);
+  params.delete(FILTER_PARAMS.expiryFrom);
+  params.delete(FILTER_PARAMS.expiryTo);
+  if (!expiry) return;
+  if ("preset" in expiry) {
+    params.set(FILTER_PARAMS.expiry, expiry.preset);
+    return;
+  }
+  if (expiry.from) params.set(FILTER_PARAMS.expiryFrom, expiry.from);
+  if (expiry.to) params.set(FILTER_PARAMS.expiryTo, expiry.to);
+}
+
+/** The range a preset covers, counted from the shop's today. */
+export function presetRange(preset: ExpiryPreset, today: string): ExpiryRange {
+  switch (preset) {
+    case "expired":
+      return { from: null, to: addDays(today, -1) };
+    case "today":
+      return { from: today, to: today };
+    case "7d":
+      return { from: today, to: addDays(today, 7) };
+    case "30d":
+      return { from: today, to: addDays(today, 30) };
+  }
+}
 
 /** The URL's sort, or the default when it's missing or unknown. */
 export function parseSort(params: URLSearchParams): DashboardSort {
@@ -41,6 +105,10 @@ export function parseSort(params: URLSearchParams): DashboardSort {
       .map((value) => value.trim())
       .find(isDashboardSort) ?? DEFAULT_SORT
   );
+}
+
+export function isExpiryPreset(value: string): value is ExpiryPreset {
+  return isKnown(EXPIRY_PRESETS, value);
 }
 
 export function isDashboardSort(value: string): value is DashboardSort {
@@ -63,6 +131,7 @@ export interface DashboardFilters {
   stock: StockFilter[];
   // Only products with batches
   tracked: boolean;
+  expiry: ExpiryFilter | null;
   // Not a filter: Clear filters keeps it
   sort: DashboardSort;
 }
@@ -74,6 +143,9 @@ export const FILTER_PARAMS = {
   status: "status",
   stock: "stock",
   tracked: "tracked",
+  expiry: "expiry",
+  expiryFrom: "expiry_from",
+  expiryTo: "expiry_to",
 };
 
 export const SORT_PARAM = "sort";
@@ -99,6 +171,7 @@ export function parseDashboardFilters(
     statuses: known(FILTER_PARAMS.status, STATUS_FILTERS),
     stock: known(FILTER_PARAMS.stock, STOCK_FILTERS),
     tracked: params.get(FILTER_PARAMS.tracked) === "1",
+    expiry: parseExpiry(params),
     sort: parseSort(params),
   };
 }
@@ -137,7 +210,13 @@ export function clearFilters(params: URLSearchParams): void {
 }
 
 export function hasActiveFilters(filters: DashboardFilters): boolean {
-  return toProductQuery(filters) !== null || hasRowFilters(filters);
+  return (
+    filters.search !== "" ||
+    filters.types.length > 0 ||
+    filters.vendors.length > 0 ||
+    filters.expiry !== null ||
+    hasRowFilters(filters)
+  );
 }
 
 // Filters the app applies to the rows, since Shopify's search can't see them
@@ -170,16 +249,26 @@ function hasStockIssue(row: DashboardRow, issue: StockFilter): boolean {
     : row.unbatchedStock !== null;
 }
 
+// The app's own metafield, which the definition marks admin-filterable
+const EARLIEST_EXPIRY_FIELD = "metafields.$app.earliest_expiration_date";
+
 /**
  * Shopify search syntax for the filters, or null when there are none.
  * Typed text is escaped so it's searched as words, never as syntax.
+ *
+ * @param expiry - the expiry filter as dates; a preset is resolved first
  */
-export function toProductQuery(filters: DashboardFilters): string | null {
+export function toProductQuery(
+  filters: DashboardFilters,
+  expiry: ExpiryRange | null = null,
+): string | null {
   const parts: string[] = [];
   if (filters.search) parts.push(escapeSearchText(filters.search));
   if (filters.types.length > 0)
     parts.push(anyOf("product_type", filters.types));
   if (filters.vendors.length > 0) parts.push(anyOf("vendor", filters.vendors));
+  if (expiry?.from) parts.push(`${EARLIEST_EXPIRY_FIELD}:>=${expiry.from}`);
+  if (expiry?.to) parts.push(`${EARLIEST_EXPIRY_FIELD}:<=${expiry.to}`);
   return parts.length > 0 ? parts.join(" AND ") : null;
 }
 

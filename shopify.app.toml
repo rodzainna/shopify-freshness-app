@@ -61,3 +61,4 @@ name = "Earliest Expiration Date"
 type = "date"
 access.admin = "merchant_read_write"
 access.storefront = "public_read"
+capabilities.admin_filterable = true

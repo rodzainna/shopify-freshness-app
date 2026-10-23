@@ -11,7 +11,9 @@ import {
   toProductSort,
   DEFAULT_SORT,
   applySort,
+  applyExpiry,
   clearFilters,
+  presetRange,
 } from "./dashboard-filters";
 
 const none: DashboardFilters = {
@@ -21,6 +23,7 @@ const none: DashboardFilters = {
   statuses: [],
   stock: [],
   tracked: false,
+  expiry: null,
   sort: DEFAULT_SORT,
 };
 
@@ -80,7 +83,7 @@ describe("applySort and clearFilters", () => {
 
   it("keeps the sort and the app's params when the filters are cleared", () => {
     const params = new URLSearchParams(
-      "shop=x.myshopify.com&q=milk&type=Dairy&vendor=Acme&status=expired&stock=over&tracked=1&sort=stock-desc",
+      "shop=x.myshopify.com&q=milk&type=Dairy&vendor=Acme&status=expired&stock=over&tracked=1&expiry=7d&expiry_from=2026-10-01&expiry_to=2026-10-31&sort=stock-desc",
     );
 
     clearFilters(params);
@@ -103,9 +106,75 @@ describe("toProductSort", () => {
   });
 });
 
+describe("expiry filter", () => {
+  const expiryOf = (search: string) =>
+    parseDashboardFilters(new URLSearchParams(search)).expiry;
+
+  it("reads a preset, which wins over a custom range", () => {
+    expect(expiryOf("expiry=7d")).toStrictEqual({ preset: "7d" });
+    expect(expiryOf("expiry=today&expiry_from=2026-10-01")).toStrictEqual({
+      preset: "today",
+    });
+  });
+
+  it("reads a custom range, either end optional, and flips a backwards one", () => {
+    expect(
+      expiryOf("expiry_from=2026-10-01&expiry_to=2026-10-31"),
+    ).toStrictEqual({ from: "2026-10-01", to: "2026-10-31" });
+    expect(expiryOf("expiry_to=2026-10-31")).toStrictEqual({
+      from: null,
+      to: "2026-10-31",
+    });
+    expect(
+      expiryOf("expiry_from=2026-10-31&expiry_to=2026-10-01"),
+    ).toStrictEqual({ from: "2026-10-01", to: "2026-10-31" });
+  });
+
+  it("ignores unknown presets and invalid dates", () => {
+    expect(expiryOf("expiry=next-year")).toBeNull();
+    expect(expiryOf("expiry_from=2026-02-30&expiry_to=soon")).toBeNull();
+  });
+
+  it("counts as a filter", () => {
+    expect(hasActiveFilters({ ...none, expiry: { preset: "30d" } })).toBe(true);
+  });
+
+  it.each([
+    ["expired", { from: null, to: "2026-10-22" }],
+    ["today", { from: "2026-10-23", to: "2026-10-23" }],
+    ["7d", { from: "2026-10-23", to: "2026-10-30" }],
+    ["30d", { from: "2026-10-23", to: "2026-11-22" }],
+  ] as const)(
+    "turns %s into a range from the shop's today",
+    (preset, range) => {
+      expect(presetRange(preset, "2026-10-23")).toStrictEqual(range);
+    },
+  );
+
+  it("writes a preset or a range to the URL, replacing the other", () => {
+    const params = new URLSearchParams("expiry_from=2026-10-01&q=milk");
+
+    applyExpiry(params, { preset: "today" });
+    expect(params.toString()).toBe("q=milk&expiry=today");
+    applyExpiry(params, { from: null, to: "2026-11-01" });
+    expect(params.toString()).toBe("q=milk&expiry_to=2026-11-01");
+    applyExpiry(params, null);
+    expect(params.toString()).toBe("q=milk");
+  });
+});
+
 describe("toProductQuery", () => {
   it("is null without filters", () => {
     expect(toProductQuery(none)).toBeNull();
+  });
+
+  it("searches the earliest expiry metafield by range", () => {
+    expect(toProductQuery(none, { from: "2026-10-23", to: "2026-10-30" })).toBe(
+      "metafields.$app.earliest_expiration_date:>=2026-10-23 AND metafields.$app.earliest_expiration_date:<=2026-10-30",
+    );
+    expect(toProductQuery(none, { from: null, to: "2026-11-01" })).toBe(
+      "metafields.$app.earliest_expiration_date:<=2026-11-01",
+    );
   });
 
   it("matches any chosen type and any chosen vendor", () => {

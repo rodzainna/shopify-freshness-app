@@ -11,6 +11,7 @@ import { BATCH_EDITOR_ID, BatchEditor, type EditTarget } from "../batch-editor";
 import { StockBadges } from "../stock-badges";
 import { DashboardFilterBar, useDashboardFilters } from "../dashboard-filters";
 import { authenticate } from "../shopify.server";
+import { readShopToday } from "../fulfillment-shopify.server";
 import {
   type DashboardProductNode,
   type DashboardRow,
@@ -28,7 +29,9 @@ import {
   filterRows,
   hasActiveFilters,
   hasRowFilters,
+  presetRange,
   type DashboardFilters,
+  type ExpiryRange,
   type ProductSort,
   parseDashboardFilters,
   toProductQuery,
@@ -59,7 +62,10 @@ type AdminGraphql = Awaited<
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const filters = parseDashboardFilters(new URL(request.url).searchParams);
-  const query = toProductQuery(filters);
+  // One instant, so a preset and the rows' statuses share the same date
+  const now = new Date();
+  const { expiry, presetToday } = await resolveExpiry(admin, filters, now);
+  const query = toProductQuery(filters, expiry);
   const sort = toProductSort(filters.sort);
   const pages = hasRowFilters(filters) ? ROW_FILTER_PAGES : 1;
 
@@ -74,7 +80,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       after,
       ...sort,
     });
-    today = getShopToday(data.shop.ianaTimezone, new Date());
+    today = presetToday ?? getShopToday(data.shop.ianaTimezone, now);
     rows.push(
       ...filterRows(toDashboardRows(data.products.nodes, today), filters),
     );
@@ -92,6 +98,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     today,
   };
 };
+
+// A preset like "Next 7 days" counts from the shop's own date
+async function resolveExpiry(
+  admin: Parameters<typeof readShopToday>[0],
+  filters: DashboardFilters,
+  now: Date,
+): Promise<{ expiry: ExpiryRange | null; presetToday: string | null }> {
+  if (!filters.expiry) return { expiry: null, presetToday: null };
+  if (!("preset" in filters.expiry)) {
+    return { expiry: filters.expiry, presetToday: null };
+  }
+  const today = await readShopToday(admin, now);
+  return {
+    expiry: presetRange(filters.expiry.preset, today),
+    presetToday: today,
+  };
+}
 
 async function fetchProductPage(
   graphql: AdminGraphql,
