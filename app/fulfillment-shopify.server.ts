@@ -6,6 +6,7 @@ import type {
 import type { NewBatch } from "../shared/batch-edit";
 import { getShopToday } from "../shared/freshness";
 import { collectErrorMessages } from "../shared/graphql-errors";
+import type { ProductInventory } from "../shared/inventory";
 import {
   MAX_BATCHES,
   SAVE_BATCH_LIST_MUTATION,
@@ -60,6 +61,25 @@ export async function readShopToday(
       }`,
   );
   return getShopToday(data.shop.ianaTimezone, now);
+}
+
+/** The product's stock, or null when the product doesn't exist. */
+export async function readProductInventory(
+  admin: AdminApiContext,
+  productId: string,
+): Promise<ProductInventory | null> {
+  const { product } = await query<{ product: ProductInventory | null }>(
+    admin,
+    `#graphql
+      query GetProductInventory($productId: ID!) {
+        product(id: $productId) {
+          tracksInventory
+          totalInventory
+        }
+      }`,
+    { productId },
+  );
+  return product;
 }
 
 interface ProductBatchesData {

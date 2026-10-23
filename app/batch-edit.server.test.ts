@@ -519,12 +519,29 @@ describe("editBatches adding batches", () => {
 });
 
 describe("loadBatches", () => {
-  it("reads the product's batches", async () => {
+  it("reads the product's batches and stock", async () => {
     const { shopify } = setup();
+    shopify.setInventory(productId, {
+      tracksInventory: true,
+      totalInventory: 25,
+    });
 
     expect(await loadBatches(shopify.admin, productId)).toStrictEqual({
       batches: opened,
       earliestExpirationDate: "2026-10-23",
+      inventory: { tracksInventory: true, totalInventory: 25 },
+    });
+  });
+
+  it("opens without stock when the stock can't be read", async () => {
+    const { shopify } = setup();
+    shopify.failNext("GetProductInventory");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(await loadBatches(shopify.admin, productId)).toStrictEqual({
+      batches: opened,
+      earliestExpirationDate: "2026-10-23",
+      inventory: null,
     });
   });
 
@@ -554,6 +571,10 @@ describe("loadBatches", () => {
 
     expect(
       await loadBatches(shopify.admin, "gid://shopify/Product/2"),
-    ).toStrictEqual({ batches: [], earliestExpirationDate: null });
+    ).toStrictEqual({
+      batches: [],
+      earliestExpirationDate: null,
+      inventory: { tracksInventory: false, totalInventory: 0 },
+    });
   });
 });

@@ -136,7 +136,11 @@ describe("app/batches", () => {
 
     expect(
       await get(`productId=${encodeURIComponent(productId)}`),
-    ).toStrictEqual({ batches: opened, earliestExpirationDate: null });
+    ).toStrictEqual({
+      batches: opened,
+      earliestExpirationDate: null,
+      inventory: { tracksInventory: false, totalInventory: 0 },
+    });
   });
 
   it("refuses a product id that isn't a GID", async () => {

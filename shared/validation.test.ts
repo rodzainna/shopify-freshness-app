@@ -21,10 +21,17 @@ describe("validateBatch", () => {
     ).toBe("Must be at least 1");
   });
 
-  it.each([2.5, Number.NaN])("rejects a quantity of %s", (quantity) => {
+  it("rejects a quantity of 2.5", () => {
     expect(
-      validateBatch({ quantity, expirationDate: "2026-11-20" }).quantity,
+      validateBatch({ quantity: 2.5, expirationDate: "2026-11-20" }).quantity,
     ).toBe("Must be a whole number");
+  });
+
+  it("asks for a quantity when the field is empty", () => {
+    expect(
+      validateBatch({ quantity: Number.NaN, expirationDate: "2026-11-20" })
+        .quantity,
+    ).toBe("Enter a quantity");
   });
 
   it("accepts the largest allowed quantity", () => {

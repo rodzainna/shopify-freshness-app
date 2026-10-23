@@ -27,11 +27,13 @@ export interface StockComparison {
  * hand, so they can drift from Shopify's stock count.
  *
  * @param complete - false when some batches didn't load
+ * @param emptyIsUnbatched - count all stock as unbatched when there are no
+ *   batches, for a form that's adding the first ones
  */
 export function compareStock(
   batches: Batch[],
   inventory: ProductInventory,
-  complete = true,
+  { complete = true, emptyIsUnbatched = false } = {},
 ): StockComparison {
   let batchTotal = 0;
   let uncountedBatches = 0;
@@ -51,7 +53,9 @@ export function compareStock(
   // Oversold products report negative stock; treat that as none
   const inStock = Math.max(0, inventory.totalInventory);
   const everyBatchCounted =
-    complete && uncountedBatches === 0 && batches.length > 0;
+    complete &&
+    uncountedBatches === 0 &&
+    (batches.length > 0 || emptyIsUnbatched);
   return {
     batchTotal,
     uncountedBatches,
@@ -59,6 +63,21 @@ export function compareStock(
     unbatchedStock:
       everyBatchCounted && inStock > batchTotal ? inStock - batchTotal : null,
   };
+}
+
+/** From compareStock: every batch is counted and nothing is over or unbatched. */
+export function matchesStock(
+  { uncountedBatches, overStock, unbatchedStock }: StockComparison,
+  inventory: ProductInventory,
+  batchCount: number,
+): boolean {
+  return (
+    inventory.tracksInventory &&
+    batchCount > 0 &&
+    uncountedBatches === 0 &&
+    overStock === null &&
+    unbatchedStock === null
+  );
 }
 
 // The panel's over-stock message, from compareStock

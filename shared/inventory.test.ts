@@ -5,7 +5,10 @@ import {
   formatInventoryMismatch,
   formatUnbatchedStock,
   getInventoryMismatch,
+  matchesStock,
+  type ProductInventory,
 } from "./inventory";
+import type { Batch } from "./freshness";
 import { MAX_QUANTITY } from "./validation";
 
 const tracked = (totalInventory: number) => ({
@@ -121,7 +124,9 @@ describe("compareStock", () => {
   });
 
   it("still flags over stock when not every batch loaded", () => {
-    expect(compareStock(batches(30), tracked(25), false)).toMatchObject({
+    expect(
+      compareStock(batches(30), tracked(25), { complete: false }),
+    ).toMatchObject({
       overStock: 5,
       unbatchedStock: null,
     });
@@ -129,12 +134,18 @@ describe("compareStock", () => {
 
   it("doesn't call stock unbatched when not every batch loaded", () => {
     expect(
-      compareStock(batches(8), tracked(10), false).unbatchedStock,
+      compareStock(batches(8), tracked(10), { complete: false }).unbatchedStock,
     ).toBeNull();
   });
 
   it("doesn't call stock unbatched when the product has no batches", () => {
     expect(compareStock([], tracked(50)).unbatchedStock).toBeNull();
+  });
+
+  it("calls all stock unbatched for a form adding the first batches", () => {
+    expect(
+      compareStock([], tracked(50), { emptyIsUnbatched: true }).unbatchedStock,
+    ).toBe(50);
   });
 
   it("flags nothing when inventory isn't tracked", () => {
@@ -146,6 +157,32 @@ describe("compareStock", () => {
       overStock: null,
       unbatchedStock: null,
     });
+  });
+});
+
+describe("matchesStock", () => {
+  const batches = (...quantities: number[]) =>
+    quantities.map((quantity) => ({ quantity, expirationDate: "2026-11-02" }));
+
+  const matches = (list: Batch[], inventory: ProductInventory) =>
+    matchesStock(compareStock(list, inventory), inventory, list.length);
+
+  it("matches when the batches add up to the stock", () => {
+    expect(matches(batches(10, 15), tracked(25))).toBe(true);
+  });
+
+  it.each([
+    ["over stock", batches(10, 20), tracked(25)],
+    ["under stock", batches(10), tracked(25)],
+    ["with an uncounted batch", [...batches(25), ...batches(0)], tracked(25)],
+    ["with no batches", batches(), tracked(0)],
+    [
+      "when stock isn't tracked",
+      batches(25),
+      { tracksInventory: false, totalInventory: 25 },
+    ],
+  ])("doesn't match %s", (_case, list, inventory) => {
+    expect(matches(list, inventory)).toBe(false);
   });
 });
 

@@ -9,7 +9,10 @@ export const MAX_QUANTITY = 1_000_000_000;
 export function validateBatch(batch: Batch): BatchErrors {
   const errors: BatchErrors = {};
 
-  if (!Number.isInteger(batch.quantity)) {
+  // NaN is an empty field
+  if (Number.isNaN(batch.quantity)) {
+    errors.quantity = "Enter a quantity";
+  } else if (!Number.isInteger(batch.quantity)) {
     errors.quantity = "Must be a whole number";
   } else if (batch.quantity < 1) {
     errors.quantity = "Must be at least 1";

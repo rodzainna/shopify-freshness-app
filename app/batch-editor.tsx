@@ -3,31 +3,53 @@ import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
 import type { BatchEditResult } from "./batch-edit.server";
-import { type EditableBatch, validateEdits } from "../shared/batch-edit";
 import {
+  type EditableBatch,
+  MAX_NEW_BATCHES_PER_SAVE,
+  type NewBatch,
+  maxNewBatches,
+  validateBatchEdit,
+} from "../shared/batch-edit";
+import {
+  type Batch,
   FRESHNESS_TONE,
   computeBatchFreshness,
   formatDaysRemaining,
   isCalendarDate,
 } from "../shared/freshness";
-import { MAX_QUANTITY, type BatchErrors } from "../shared/validation";
+import {
+  type ProductInventory,
+  compareStock,
+  matchesStock,
+} from "../shared/inventory";
+import { MAX_BATCHES } from "../shared/product-metafields";
+import { StockBadges } from "./stock-badges";
+import {
+  MAX_QUANTITY,
+  type BatchErrors,
+  hasErrors,
+} from "../shared/validation";
 
 export const BATCH_EDITOR_ID = "batch-editor";
 
-// One line per batch: quantity, date (s-date-field is at least 14rem), status
-const ROW_COLUMNS = "8rem 14rem auto";
+// One line per batch: quantity, date (s-date-field is at least 14rem), status, remove
+const ROW_COLUMNS = "8rem 14rem 1fr auto";
 
 export interface EditTarget {
   productId: string;
   title: string;
+  // Picks the heading; the loaded batches decide the form
+  hasBatches: boolean;
   // Changes on every open, so reopening the same product loads it again
   openedAt: number;
 }
 
-type Loaded = { batches: EditableBatch[] } | { message: string };
+type Loaded =
+  | { batches: EditableBatch[]; inventory: ProductInventory | null }
+  | { message: string };
 type Notice = { tone: "warning" | "critical"; message: string };
 
-/** One modal for the dashboard, opened by a row's Edit batches button. */
+/** One modal for the dashboard, opened by a row's Edit or Add batches button. */
 export function BatchEditor({
   target,
   today,
@@ -43,14 +65,18 @@ export function BatchEditor({
   // What the modal opened with, and the form's values
   const [opened, setOpened] = useState<EditableBatch[]>([]);
   const [edited, setEdited] = useState<EditableBatch[]>([]);
+  const [added, setAdded] = useState<NewBatch[]>([]);
   const [errors, setErrors] = useState<Record<string, BatchErrors>>({});
   const [notice, setNotice] = useState<Notice | null>(null);
+  // The current product's batches loaded, so rows can be added
+  const [ready, setReady] = useState(false);
   // Remounts the fields, since their value attributes only set a starting value
   const [formVersion, setFormVersion] = useState(0);
 
-  function reset(batches: EditableBatch[]) {
+  function reset(batches: EditableBatch[], added: NewBatch[] = []) {
     setOpened(batches);
     setEdited(batches);
+    setAdded(added);
     setErrors({});
     setFormVersion((version) => version + 1);
   }
@@ -62,12 +88,17 @@ export function BatchEditor({
     saved?: unknown;
   }>({});
   // The product the last save was for, so its result can't land on another
-  const savedFor = useRef<{ productId: string; edited: EditableBatch[] }>();
+  const savedFor = useRef<{
+    productId: string;
+    edited: EditableBatch[];
+    added: NewBatch[];
+  }>();
 
   useEffect(() => {
     if (!target || handled.current.target === target) return;
     handled.current.target = target;
     setNotice(null);
+    setReady(false);
     reset([]);
     load.load(`/app/batches?productId=${encodeURIComponent(target.productId)}`);
   }, [target, load]);
@@ -78,8 +109,10 @@ export function BatchEditor({
       return;
     }
     handled.current.loaded = loaded;
-    if ("batches" in loaded) reset(loaded.batches);
-    else setNotice({ tone: "critical", message: loaded.message });
+    if ("batches" in loaded) {
+      reset(loaded.batches, startingRows(loaded.batches));
+      setReady(true);
+    } else setNotice({ tone: "critical", message: loaded.message });
   }, [load.state, load.data]);
 
   useEffect(() => {
@@ -102,7 +135,8 @@ export function BatchEditor({
         setNotice({ tone: "critical", message: result.message });
         return;
       case "changed":
-        reset(result.batches);
+        // New rows go too: a save whose response was lost may have listed them
+        reset(result.batches, startingRows(result.batches));
         setNotice({
           tone: "warning",
           message:
@@ -113,7 +147,11 @@ export function BatchEditor({
         modal.current?.hideOverlay();
         return;
       case "saved": {
-        const problems = saveProblems(result.failed.length, result.dateFailed);
+        const problems = saveProblems(
+          result.failed.length,
+          result.failedNew.length,
+          result.dateFailed,
+        );
         if (!problems) {
           shopify.toast.show("Batches saved");
           modal.current?.hideOverlay();
@@ -128,6 +166,9 @@ export function BatchEditor({
               : batch,
           ),
         );
+        setAdded(
+          sent.added.filter(({ handle }) => result.failedNew.includes(handle)),
+        );
         setNotice({ tone: "warning", message: problems });
       }
     }
@@ -141,93 +182,121 @@ export function BatchEditor({
     );
   }
 
+  function addRow() {
+    setAdded((batches) => [...batches, newBatch()]);
+  }
+
+  function updateNew(handle: string, change: Partial<NewBatch>) {
+    setAdded((batches) =>
+      batches.map((batch) =>
+        batch.handle === handle ? { ...batch, ...change } : batch,
+      ),
+    );
+  }
+
+  function removeNew(handle: string) {
+    setAdded((batches) => batches.filter((batch) => batch.handle !== handle));
+    setErrors((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([key]) => key !== handle),
+      ),
+    );
+  }
+
   function submit() {
     if (!target) return;
-    const found = validateEdits(edited);
+    const found = validateBatchEdit(edited, added);
     setErrors(found);
     setNotice(null);
     if (Object.keys(found).length > 0) return;
-    savedFor.current = { productId: target.productId, edited };
+    savedFor.current = { productId: target.productId, edited, added };
     save.submit(
-      { productId: target.productId, opened, edited },
+      { productId: target.productId, opened, edited, added },
       { method: "post", action: "/app/batches", encType: "application/json" },
     );
   }
 
   const loading = load.state !== "idle";
   const saving = save.state !== "idle";
+  // Read with the batches; a save doesn't change it
+  const inventory =
+    ready && load.data && "inventory" in load.data ? load.data.inventory : null;
+  const rowCount = edited.length + added.length;
+  const atAddLimit = added.length >= maxNewBatches(edited.length);
+  // The dashboard row may be stale, so loaded batches decide once they're in
+  const hasBatches = ready ? opened.length > 0 : target?.hasBatches !== false;
+  const verb = hasBatches ? "Edit" : "Add";
 
   return (
     <s-modal
       ref={modal}
       id={BATCH_EDITOR_ID}
-      heading={target ? `Edit batches: ${target.title}` : "Edit batches"}
+      heading={target ? `${verb} batches: ${target.title}` : `${verb} batches`}
     >
       <s-stack gap="base">
         {notice && <s-banner tone={notice.tone}>{notice.message}</s-banner>}
         {loading && <s-spinner accessibilityLabel="Loading batches" />}
         <s-stack key={formVersion} gap="small-200">
-          {edited.length > 0 && (
+          {rowCount > 0 && (
             <s-grid gridTemplateColumns={ROW_COLUMNS} columnGap="base">
               <s-text>Quantity</s-text>
               <s-text>Expiry date</s-text>
               <s-text>Status</s-text>
             </s-grid>
           )}
-          {edited.map((batch) => {
-            const batchErrors = errors[batch.id] ?? {};
-            const freshness = isCalendarDate(batch.expirationDate)
-              ? computeBatchFreshness(batch.expirationDate, today)
-              : null;
-            return (
-              <s-grid
-                key={batch.id}
-                gridTemplateColumns={ROW_COLUMNS}
-                columnGap="base"
-                alignItems="start"
-              >
-                <s-number-field
-                  label="Quantity"
-                  labelAccessibilityVisibility="exclusive"
-                  value={String(batch.quantity)}
-                  min={1}
-                  max={MAX_QUANTITY}
-                  step={1}
-                  error={batchErrors.quantity}
-                  disabled={saving || undefined}
-                  onInput={(event) =>
-                    update(batch.id, {
-                      quantity: Number(event.currentTarget.value),
-                    })
-                  }
-                />
-                <s-date-field
-                  label="Expiry date"
-                  labelAccessibilityVisibility="exclusive"
-                  value={batch.expirationDate}
-                  error={batchErrors.expirationDate}
-                  disabled={saving || undefined}
-                  onChange={(event) =>
-                    update(batch.id, {
-                      expirationDate: event.currentTarget.value,
-                    })
-                  }
-                />
-                {freshness && (
-                  <s-badge tone={FRESHNESS_TONE[freshness.status]}>
-                    {formatDaysRemaining(freshness.daysRemaining)}
-                  </s-badge>
-                )}
-              </s-grid>
-            );
-          })}
+          {edited.map((batch) => (
+            <BatchRow
+              key={batch.id}
+              batch={batch}
+              errors={errors[batch.id]}
+              today={today}
+              disabled={saving}
+              onChange={(change) => update(batch.id, change)}
+            />
+          ))}
+          {added.map((batch, index) => (
+            <BatchRow
+              key={batch.handle}
+              batch={batch}
+              errors={errors[batch.handle]}
+              today={today}
+              disabled={saving}
+              onChange={(change) => updateNew(batch.handle, change)}
+              onRemove={() => removeNew(batch.handle)}
+              removeLabel={`Remove new batch ${index + 1}`}
+            />
+          ))}
         </s-stack>
+        {ready && inventory && (
+          <StockSummary
+            // New rows with no quantity yet don't hide the unbatched count
+            batches={[
+              ...edited,
+              ...added.filter(({ quantity }) => !Number.isNaN(quantity)),
+            ]}
+            inventory={inventory}
+          />
+        )}
+        {ready && (
+          <s-stack direction="inline" gap="small-200" alignItems="center">
+            <s-button
+              icon="plus"
+              disabled={saving || atAddLimit || undefined}
+              onClick={addRow}
+            >
+              Add batch
+            </s-button>
+            {atAddLimit && (
+              <s-text color="subdued">{addLimitNote(edited.length)}</s-text>
+            )}
+          </s-stack>
+        )}
       </s-stack>
       <s-button
         slot="primary-action"
         variant="primary"
         loading={saving || undefined}
-        disabled={loading || edited.length === 0 || undefined}
+        disabled={loading || rowCount === 0 || undefined}
         onClick={submit}
       >
         Save
@@ -244,11 +313,141 @@ export function BatchEditor({
   );
 }
 
-function saveProblems(failed: number, dateFailed: boolean): string | null {
+// The dashboard's stock flags, live as the form changes
+function StockSummary({
+  batches,
+  inventory,
+}: {
+  batches: Batch[];
+  inventory: ProductInventory;
+}) {
+  const comparison = compareStock(batches, inventory, {
+    emptyIsUnbatched: true,
+  });
+  const { batchTotal, uncountedBatches } = comparison;
+  const stock = inventory.tracksInventory
+    ? `Stock ${inventory.totalInventory}`
+    : "Stock not tracked";
+  return (
+    <s-stack direction="inline" gap="small-200" alignItems="center">
+      <s-text>
+        {stock} · In batches {batchTotal}
+      </s-text>
+      {uncountedBatches > 0 && (
+        <s-text color="subdued">({uncountedBatches} not counted)</s-text>
+      )}
+      <StockBadges {...comparison} />
+      {matchesStock(comparison, inventory, batches.length) && (
+        <s-badge tone="success">Matches stock</s-badge>
+      )}
+    </s-stack>
+  );
+}
+
+function addLimitNote(existing: number): string {
+  return MAX_BATCHES - existing <= MAX_NEW_BATCHES_PER_SAVE
+    ? `A product can have at most ${MAX_BATCHES} batches.`
+    : `Save these ${MAX_NEW_BATCHES_PER_SAVE} first to add more.`;
+}
+
+// A product without batches starts with one row to fill in
+function startingRows(batches: EditableBatch[]): NewBatch[] {
+  return batches.length === 0 ? [newBatch()] : [];
+}
+
+function newBatch(): NewBatch {
+  // NaN leaves the quantity field empty
+  return { handle: crypto.randomUUID(), quantity: NaN, expirationDate: "" };
+}
+
+function BatchRow({
+  batch,
+  errors = {},
+  today,
+  disabled,
+  onChange,
+  onRemove,
+  removeLabel,
+}: {
+  batch: Batch;
+  errors?: BatchErrors;
+  today: string;
+  disabled: boolean;
+  onChange: (change: Partial<Batch>) => void;
+  // Only new rows; removing a saved batch is left to the product panel
+  onRemove?: () => void;
+  removeLabel?: string;
+}) {
+  const freshness = isCalendarDate(batch.expirationDate)
+    ? computeBatchFreshness(batch.expirationDate, today)
+    : null;
+  return (
+    <s-grid
+      gridTemplateColumns={ROW_COLUMNS}
+      columnGap="base"
+      // A field's error text makes it taller, so then the badge stays at the top
+      alignItems={hasErrors(errors) ? "start" : "center"}
+    >
+      <s-number-field
+        label="Quantity"
+        labelAccessibilityVisibility="exclusive"
+        value={Number.isNaN(batch.quantity) ? "" : String(batch.quantity)}
+        min={1}
+        max={MAX_QUANTITY}
+        step={1}
+        error={errors.quantity}
+        disabled={disabled || undefined}
+        onInput={({ currentTarget: { value } }) =>
+          onChange({ quantity: value === "" ? NaN : Number(value) })
+        }
+      />
+      <s-date-field
+        label="Expiry date"
+        labelAccessibilityVisibility="exclusive"
+        value={batch.expirationDate}
+        error={errors.expirationDate}
+        disabled={disabled || undefined}
+        onChange={(event) =>
+          onChange({ expirationDate: event.currentTarget.value })
+        }
+      />
+      <s-box>
+        {freshness && (
+          <s-badge tone={FRESHNESS_TONE[freshness.status]}>
+            {formatDaysRemaining(freshness.daysRemaining)}
+          </s-badge>
+        )}
+      </s-box>
+      <s-box>
+        {onRemove && (
+          <s-button
+            icon="delete"
+            variant="tertiary"
+            tone="critical"
+            accessibilityLabel={removeLabel}
+            disabled={disabled || undefined}
+            onClick={onRemove}
+          />
+        )}
+      </s-box>
+    </s-grid>
+  );
+}
+
+function saveProblems(
+  failed: number,
+  failedNew: number,
+  dateFailed: boolean,
+): string | null {
   const parts: string[] = [];
   if (failed > 0) {
     parts.push(
       `${failed} ${failed === 1 ? "batch wasn't" : "batches weren't"} saved and kept the old values.`,
+    );
+  }
+  if (failedNew > 0) {
+    parts.push(
+      `${failedNew} new ${failedNew === 1 ? "batch wasn't" : "batches weren't"} added.`,
     );
   }
   if (dateFailed) {
