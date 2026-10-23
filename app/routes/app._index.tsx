@@ -11,6 +11,7 @@ import { BATCH_EDITOR_ID, BatchEditor, type EditTarget } from "../batch-editor";
 import { StockBadges } from "../stock-badges";
 import { DashboardFilterBar, useDashboardFilters } from "../dashboard-filters";
 import { authenticate } from "../shopify.server";
+import { readShopToday } from "../fulfillment-shopify.server";
 import {
   type DashboardProductNode,
   type DashboardRow,
@@ -28,7 +29,11 @@ import {
   filterRows,
   hasActiveFilters,
   hasRowFilters,
+  isAppSort,
+  presetRange,
+  sortRowsByExpiry,
   type DashboardFilters,
+  type ExpiryRange,
   type ProductSort,
   parseDashboardFilters,
   toProductQuery,
@@ -59,9 +64,13 @@ type AdminGraphql = Awaited<
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const filters = parseDashboardFilters(new URL(request.url).searchParams);
-  const query = toProductQuery(filters);
+  // One instant, so a preset and the rows' statuses share the same date
+  const now = new Date();
+  const { expiry, presetToday } = await resolveExpiry(admin, filters, now);
+  const query = toProductQuery(filters, expiry);
   const sort = toProductSort(filters.sort);
-  const pages = hasRowFilters(filters) ? ROW_FILTER_PAGES : 1;
+  const appSort = isAppSort(filters.sort);
+  const pages = hasRowFilters(filters) || appSort ? ROW_FILTER_PAGES : 1;
 
   const rows: DashboardRow[] = [];
   let checkedProducts = 0;
@@ -74,24 +83,45 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       after,
       ...sort,
     });
-    today = getShopToday(data.shop.ianaTimezone, new Date());
+    today = presetToday ?? getShopToday(data.shop.ianaTimezone, now);
     rows.push(
       ...filterRows(toDashboardRows(data.products.nodes, today), filters),
     );
     checkedProducts += data.products.nodes.length;
     hasMoreProducts = data.products.pageInfo.hasNextPage;
     after = data.products.pageInfo.endCursor;
-    if (!hasMoreProducts || rows.length >= PRODUCT_LIMIT) break;
+    // An app sort needs every page it can check, or a later page's rows are missed
+    if (!hasMoreProducts || (!appSort && rows.length >= PRODUCT_LIMIT)) break;
   }
 
+  const sorted = appSort ? sortRowsByExpiry(rows) : rows;
   return {
-    rows: rows.slice(0, PRODUCT_LIMIT),
+    rows: sorted.slice(0, PRODUCT_LIMIT),
     hasMoreProducts: hasMoreProducts || rows.length > PRODUCT_LIMIT,
+    // Shopify has products the loader didn't check
+    uncheckedProducts: hasMoreProducts,
     checkedProducts,
     filters,
     today,
   };
 };
+
+// A preset like "Next 7 days" counts from the shop's own date
+async function resolveExpiry(
+  admin: Parameters<typeof readShopToday>[0],
+  filters: DashboardFilters,
+  now: Date,
+): Promise<{ expiry: ExpiryRange | null; presetToday: string | null }> {
+  if (!filters.expiry) return { expiry: null, presetToday: null };
+  if (!("preset" in filters.expiry)) {
+    return { expiry: filters.expiry, presetToday: null };
+  }
+  const today = await readShopToday(admin, now);
+  return {
+    expiry: presetRange(filters.expiry.preset, today),
+    presetToday: today,
+  };
+}
 
 async function fetchProductPage(
   graphql: AdminGraphql,
@@ -178,8 +208,14 @@ async function fetchProductPage(
 }
 
 export default function Dashboard() {
-  const { rows, hasMoreProducts, checkedProducts, filters, today } =
-    useLoaderData<typeof loader>();
+  const {
+    rows,
+    hasMoreProducts,
+    uncheckedProducts,
+    checkedProducts,
+    filters,
+    today,
+  } = useLoaderData<typeof loader>();
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const controls = useDashboardFilters(filters);
   const location = useLocation();
@@ -190,7 +226,7 @@ export default function Dashboard() {
     navigation.location.pathname === location.pathname;
   const filtered = hasActiveFilters(filters);
 
-  if (rows.length === 0 && !filtered) {
+  if (rows.length === 0 && !filtered && !isAppSort(filters.sort)) {
     return (
       <s-page heading="Freshness overview">
         <s-section>
@@ -333,18 +369,29 @@ export default function Dashboard() {
         </s-table>
         {rows.length === 0 && (
           <s-box padding="base">
-            <s-stack gap="small-200" alignItems="center">
-              <s-text>No products match.</s-text>
-              <s-button variant="tertiary" onClick={controls.clearAll}>
-                Clear filters
-              </s-button>
-            </s-stack>
+            {filtered ? (
+              <s-stack gap="small-200" alignItems="center">
+                <s-text>No products match.</s-text>
+                <s-button variant="tertiary" onClick={controls.clearAll}>
+                  Clear filters
+                </s-button>
+              </s-stack>
+            ) : (
+              <s-stack alignItems="center">
+                <s-text>No products have an expiry date yet.</s-text>
+              </s-stack>
+            )}
           </s-box>
         )}
       </s-section>
+      {isAppSort(filters.sort) && rows.length > 0 && (
+        <s-paragraph color="subdued">
+          Products without an expiry date aren&apos;t listed in this sort.
+        </s-paragraph>
+      )}
       {hasMoreProducts && (
         <s-paragraph color="subdued">
-          {limitNote(rows.length, checkedProducts, filters)}
+          {limitNote(rows.length, checkedProducts, uncheckedProducts, filters)}
         </s-paragraph>
       )}
       <BatchEditor target={editing} today={today} />
@@ -353,7 +400,15 @@ export default function Dashboard() {
   );
 }
 
-function limitNote(shown: number, checked: number, filters: DashboardFilters) {
+function limitNote(
+  shown: number,
+  checked: number,
+  unchecked: boolean,
+  filters: DashboardFilters,
+) {
+  if (unchecked && isAppSort(filters.sort)) {
+    return `Sorted the first ${checked} products with an expiry date. Filter by expiry or search to narrow it down.`;
+  }
   if (shown >= PRODUCT_LIMIT) {
     const matching = hasRowFilters(filters) ? "matching " : "";
     return `Showing the first ${PRODUCT_LIMIT} ${matching}products in this sort order.`;

@@ -11,7 +11,11 @@ import {
   toProductSort,
   DEFAULT_SORT,
   applySort,
+  applyExpiry,
   clearFilters,
+  presetRange,
+  isAppSort,
+  sortRowsByExpiry,
 } from "./dashboard-filters";
 
 const none: DashboardFilters = {
@@ -21,8 +25,28 @@ const none: DashboardFilters = {
   statuses: [],
   stock: [],
   tracked: false,
+  expiry: null,
   sort: DEFAULT_SORT,
 };
+
+const row = (overrides: Partial<DashboardRow>): DashboardRow => ({
+  id: "gid://shopify/Product/1",
+  title: "Product",
+  adminUrl: "shopify://admin/products/1",
+  imageUrl: null,
+  earliestExpirationDate: null,
+  tracked: false,
+  status: "Not set",
+  batches: [],
+  hiddenBatches: 0,
+  hasMoreBatches: false,
+  stock: null,
+  batchTotal: 0,
+  uncountedBatches: 0,
+  overStock: null,
+  unbatchedStock: null,
+  ...overrides,
+});
 
 describe("parseDashboardFilters", () => {
   it("reads the search, types and vendors, keeping the app's other params out", () => {
@@ -80,11 +104,54 @@ describe("applySort and clearFilters", () => {
 
   it("keeps the sort and the app's params when the filters are cleared", () => {
     const params = new URLSearchParams(
-      "shop=x.myshopify.com&q=milk&type=Dairy&vendor=Acme&status=expired&stock=over&tracked=1&sort=stock-desc",
+      "shop=x.myshopify.com&q=milk&type=Dairy&vendor=Acme&status=expired&stock=over&tracked=1&expiry=7d&expiry_from=2026-10-01&expiry_to=2026-10-31&sort=stock-desc",
     );
 
     clearFilters(params);
     expect(params.toString()).toBe("shop=x.myshopify.com&sort=stock-desc");
+  });
+});
+
+describe("earliest expiry sort", () => {
+  it("asks Shopify only for products with an expiry date", () => {
+    expect(toProductQuery({ ...none, sort: "expiry" })).toBe(
+      "metafields.$app.earliest_expiration_date:>=1900-01-01",
+    );
+    // An expiry range already implies a date
+    expect(
+      toProductQuery(
+        { ...none, sort: "expiry" },
+        { from: null, to: "2026-11-01" },
+      ),
+    ).toBe("metafields.$app.earliest_expiration_date:<=2026-11-01");
+    expect(toProductQuery({ ...none, sort: "stock" })).toBeNull();
+  });
+
+  it("is applied by the app, fetching by title", () => {
+    expect(isAppSort("expiry")).toBe(true);
+    expect(isAppSort("stock")).toBe(false);
+    expect(toProductSort("expiry")).toStrictEqual({
+      sortKey: "TITLE",
+      reverse: false,
+    });
+  });
+
+  it("puts the soonest first and products without a date last, in their order", () => {
+    const rows = [
+      row({ id: "none-a", earliestExpirationDate: null }),
+      row({ id: "nov", earliestExpirationDate: "2026-11-15" }),
+      row({ id: "oct", earliestExpirationDate: "2026-10-19" }),
+      row({ id: "none-b", earliestExpirationDate: null }),
+      row({ id: "oct-too", earliestExpirationDate: "2026-10-19" }),
+    ];
+
+    expect(sortRowsByExpiry(rows).map(({ id }) => id)).toStrictEqual([
+      "oct",
+      "oct-too",
+      "nov",
+      "none-a",
+      "none-b",
+    ]);
   });
 });
 
@@ -103,9 +170,75 @@ describe("toProductSort", () => {
   });
 });
 
+describe("expiry filter", () => {
+  const expiryOf = (search: string) =>
+    parseDashboardFilters(new URLSearchParams(search)).expiry;
+
+  it("reads a preset, which wins over a custom range", () => {
+    expect(expiryOf("expiry=7d")).toStrictEqual({ preset: "7d" });
+    expect(expiryOf("expiry=today&expiry_from=2026-10-01")).toStrictEqual({
+      preset: "today",
+    });
+  });
+
+  it("reads a custom range, either end optional, and flips a backwards one", () => {
+    expect(
+      expiryOf("expiry_from=2026-10-01&expiry_to=2026-10-31"),
+    ).toStrictEqual({ from: "2026-10-01", to: "2026-10-31" });
+    expect(expiryOf("expiry_to=2026-10-31")).toStrictEqual({
+      from: null,
+      to: "2026-10-31",
+    });
+    expect(
+      expiryOf("expiry_from=2026-10-31&expiry_to=2026-10-01"),
+    ).toStrictEqual({ from: "2026-10-01", to: "2026-10-31" });
+  });
+
+  it("ignores unknown presets and invalid dates", () => {
+    expect(expiryOf("expiry=next-year")).toBeNull();
+    expect(expiryOf("expiry_from=2026-02-30&expiry_to=soon")).toBeNull();
+  });
+
+  it("counts as a filter", () => {
+    expect(hasActiveFilters({ ...none, expiry: { preset: "30d" } })).toBe(true);
+  });
+
+  it.each([
+    ["expired", { from: null, to: "2026-10-22" }],
+    ["today", { from: "2026-10-23", to: "2026-10-23" }],
+    ["7d", { from: "2026-10-23", to: "2026-10-30" }],
+    ["30d", { from: "2026-10-23", to: "2026-11-22" }],
+  ] as const)(
+    "turns %s into a range from the shop's today",
+    (preset, range) => {
+      expect(presetRange(preset, "2026-10-23")).toStrictEqual(range);
+    },
+  );
+
+  it("writes a preset or a range to the URL, replacing the other", () => {
+    const params = new URLSearchParams("expiry_from=2026-10-01&q=milk");
+
+    applyExpiry(params, { preset: "today" });
+    expect(params.toString()).toBe("q=milk&expiry=today");
+    applyExpiry(params, { from: null, to: "2026-11-01" });
+    expect(params.toString()).toBe("q=milk&expiry_to=2026-11-01");
+    applyExpiry(params, null);
+    expect(params.toString()).toBe("q=milk");
+  });
+});
+
 describe("toProductQuery", () => {
   it("is null without filters", () => {
     expect(toProductQuery(none)).toBeNull();
+  });
+
+  it("searches the earliest expiry metafield by range", () => {
+    expect(toProductQuery(none, { from: "2026-10-23", to: "2026-10-30" })).toBe(
+      "metafields.$app.earliest_expiration_date:>=2026-10-23 AND metafields.$app.earliest_expiration_date:<=2026-10-30",
+    );
+    expect(toProductQuery(none, { from: null, to: "2026-11-01" })).toBe(
+      "metafields.$app.earliest_expiration_date:<=2026-11-01",
+    );
   });
 
   it("matches any chosen type and any chosen vendor", () => {
@@ -177,24 +310,6 @@ describe("row filters", () => {
     ).toBe(false);
   });
 
-  const row = (overrides: Partial<DashboardRow>): DashboardRow => ({
-    id: "gid://shopify/Product/1",
-    title: "Product",
-    adminUrl: "shopify://admin/products/1",
-    imageUrl: null,
-    earliestExpirationDate: null,
-    tracked: false,
-    status: "Not set",
-    batches: [],
-    hiddenBatches: 0,
-    hasMoreBatches: false,
-    stock: null,
-    batchTotal: 0,
-    uncountedBatches: 0,
-    overStock: null,
-    unbatchedStock: null,
-    ...overrides,
-  });
   const batch = {
     id: "gid://shopify/Metaobject/1",
     quantity: 1,

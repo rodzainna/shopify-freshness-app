@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   useFetcher,
   useLocation,
@@ -9,15 +9,20 @@ import {
 import {
   type DashboardFilters,
   type DashboardSort,
+  EXPIRY_PRESETS,
+  type ExpiryFilter,
   FILTER_PARAMS,
   SORTS,
   STATUS_FILTERS,
   STOCK_FILTERS,
+  applyExpiry,
   applySort,
   clearFilters,
   isDashboardSort,
+  isExpiryPreset,
   parseSort,
 } from "../shared/dashboard-filters";
+import { isCalendarDate } from "../shared/freshness";
 import type { FilterOptions } from "./routes/app.filter-options";
 
 const SEARCH_DELAY_MS = 300;
@@ -30,6 +35,11 @@ interface Option {
 const STATUS_OPTIONS = toOptions(STATUS_FILTERS);
 const STOCK_OPTIONS = toOptions(STOCK_FILTERS);
 const SORT_OPTIONS = toOptions(SORTS);
+const CUSTOM_RANGE = "custom";
+const EXPIRY_OPTIONS = [
+  ...toOptions(EXPIRY_PRESETS),
+  { value: CUSTOM_RANGE, label: "Custom range" },
+];
 
 type UpdateParams = (params: URLSearchParams) => void;
 
@@ -88,6 +98,10 @@ export function useDashboardFilters(filters: DashboardFilters) {
     });
   }
 
+  function setExpiry(expiry: ExpiryFilter | null) {
+    update((params) => applyExpiry(params, expiry));
+  }
+
   function setSort(next: DashboardSort) {
     if (next !== sort) update((params) => applySort(params, next));
   }
@@ -100,7 +114,7 @@ export function useDashboardFilters(filters: DashboardFilters) {
     update(clearFilters);
   }
 
-  return { text, sort, search, setFilter, setSort, clearAll };
+  return { text, sort, search, setFilter, setExpiry, setSort, clearAll };
 }
 
 export type DashboardFilterControls = ReturnType<typeof useDashboardFilters>;
@@ -125,7 +139,7 @@ export function DashboardFilterBar({
   const trackedBox = useLiveProperty("s-checkbox", "checked", filters.tracked);
 
   return (
-    <s-stack slot="filters" direction="inline" gap="small-200">
+    <s-stack slot="filters" gap="small-200">
       <s-search-field
         ref={searchField}
         label="Search products"
@@ -133,47 +147,69 @@ export function DashboardFilterBar({
         placeholder="Search products"
         onInput={(event) => controls.search(event.currentTarget.value)}
       />
-      <FilterButton
-        id="status-filter"
-        label="Status"
-        options={STATUS_OPTIONS}
-        selected={filters.statuses}
-        onApply={(values) => controls.setFilter(FILTER_PARAMS.status, values)}
-      />
-      <FilterButton
-        id="stock-filter"
-        label="Stock"
-        options={STOCK_OPTIONS}
-        selected={filters.stock}
-        onApply={(values) => controls.setFilter(FILTER_PARAMS.stock, values)}
-      />
-      <FilterButton
-        id="type-filter"
-        label="Type"
-        options={options.data?.types.map(sameLabel)}
-        selected={filters.types}
-        onOpen={loadOptions}
-        onApply={(values) => controls.setFilter(FILTER_PARAMS.type, values)}
-      />
-      <FilterButton
-        id="vendor-filter"
-        label="Vendor"
-        options={options.data?.vendors.map(sameLabel)}
-        selected={filters.vendors}
-        onOpen={loadOptions}
-        onApply={(values) => controls.setFilter(FILTER_PARAMS.vendor, values)}
-      />
-      <s-checkbox
-        ref={trackedBox}
-        label="Tracked only"
-        onChange={(event) =>
-          controls.setFilter(
-            FILTER_PARAMS.tracked,
-            event.currentTarget.checked ? ["1"] : [],
-          )
-        }
-      />
-      <SortButton sort={controls.sort} onSort={controls.setSort} />
+      {/* Filters on the left; the tracked toggle and sort on the right */}
+      <s-stack
+        direction="inline"
+        justifyContent="space-between"
+        alignItems="center"
+        gap="small-200"
+      >
+        <s-stack direction="inline" gap="small-200">
+          <FilterButton
+            id="status-filter"
+            label="Status"
+            options={STATUS_OPTIONS}
+            selected={filters.statuses}
+            onApply={(values) =>
+              controls.setFilter(FILTER_PARAMS.status, values)
+            }
+          />
+          <FilterButton
+            id="stock-filter"
+            label="Stock"
+            options={STOCK_OPTIONS}
+            selected={filters.stock}
+            onApply={(values) =>
+              controls.setFilter(FILTER_PARAMS.stock, values)
+            }
+          />
+          <FilterButton
+            id="type-filter"
+            label="Type"
+            options={options.data?.types.map(sameLabel)}
+            selected={filters.types}
+            onOpen={loadOptions}
+            onApply={(values) => controls.setFilter(FILTER_PARAMS.type, values)}
+          />
+          <FilterButton
+            id="vendor-filter"
+            label="Vendor"
+            options={options.data?.vendors.map(sameLabel)}
+            selected={filters.vendors}
+            onOpen={loadOptions}
+            onApply={(values) =>
+              controls.setFilter(FILTER_PARAMS.vendor, values)
+            }
+          />
+          <ExpiryFilterButton
+            expiry={filters.expiry}
+            onApply={controls.setExpiry}
+          />
+        </s-stack>
+        <s-stack direction="inline" gap="base" alignItems="center">
+          <s-checkbox
+            ref={trackedBox}
+            label="Tracked only"
+            onChange={(event) =>
+              controls.setFilter(
+                FILTER_PARAMS.tracked,
+                event.currentTarget.checked ? ["1"] : [],
+              )
+            }
+          />
+          <SortButton sort={controls.sort} onSort={controls.setSort} />
+        </s-stack>
+      </s-stack>
     </s-stack>
   );
 }
@@ -270,6 +306,92 @@ function FilterButton({
   );
 }
 
+const EXPIRY_POPOVER_ID = "expiry-filter";
+
+function ExpiryFilterButton({
+  expiry,
+  onApply,
+}: {
+  expiry: ExpiryFilter | null;
+  onApply: (expiry: ExpiryFilter | null) => void;
+}) {
+  const [choice, setChoice] = useState<string[]>([]);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const fromField = useLiveProperty("s-date-field", "value", from);
+  const toField = useLiveProperty("s-date-field", "value", to);
+
+  // Start from what's applied, dropping changes from a dismissed popover
+  function open() {
+    if (!expiry) setChoice([]);
+    else setChoice(["preset" in expiry ? expiry.preset : CUSTOM_RANGE]);
+    setFrom(expiry && !("preset" in expiry) ? (expiry.from ?? "") : "");
+    setTo(expiry && !("preset" in expiry) ? (expiry.to ?? "") : "");
+  }
+
+  function apply() {
+    const [value] = choice;
+    if (value && isExpiryPreset(value)) {
+      onApply({ preset: value });
+    } else if (value === CUSTOM_RANGE && (from || to)) {
+      onApply({ from: from || null, to: to || null });
+    } else {
+      onApply(null);
+    }
+  }
+
+  return (
+    <>
+      <s-button commandFor={EXPIRY_POPOVER_ID} onClick={open}>
+        {expiryButtonText(expiry)}
+      </s-button>
+      <ChoicePopover
+        id={EXPIRY_POPOVER_ID}
+        label="Expiry"
+        choices={EXPIRY_OPTIONS}
+        draft={choice}
+        onDraft={setChoice}
+        onApply={apply}
+        onClear={() => onApply(null)}
+        // A custom range needs a real date; Clear removes the filter
+        applyDisabled={
+          choice[0] === CUSTOM_RANGE &&
+          ((!from && !to) || !isDateOrEmpty(from) || !isDateOrEmpty(to))
+        }
+      >
+        {choice[0] === CUSTOM_RANGE && (
+          <s-stack gap="small-200">
+            <s-date-field
+              ref={fromField}
+              label="From"
+              onChange={(event) => setFrom(event.currentTarget.value)}
+            />
+            <s-date-field
+              ref={toField}
+              label="To"
+              onChange={(event) => setTo(event.currentTarget.value)}
+            />
+          </s-stack>
+        )}
+      </ChoicePopover>
+    </>
+  );
+}
+
+function isDateOrEmpty(value: string): boolean {
+  return value === "" || isCalendarDate(value);
+}
+
+// "Expiry", "Expiry: Next 7 days" or "Expiry: 2026-10-01 – 2026-10-31"
+function expiryButtonText(expiry: ExpiryFilter | null): string {
+  if (!expiry) return "Expiry";
+  if ("preset" in expiry) return `Expiry: ${EXPIRY_PRESETS[expiry.preset]}`;
+  if (expiry.from && expiry.to) return `Expiry: ${expiry.from} – ${expiry.to}`;
+  return expiry.from
+    ? `Expiry: from ${expiry.from}`
+    : `Expiry: until ${expiry.to}`;
+}
+
 // A choice list that applies only on Apply, so moving through it loads nothing
 function ChoicePopover({
   id,
@@ -282,6 +404,8 @@ function ChoicePopover({
   onDraft,
   onApply,
   onClear,
+  applyDisabled = false,
+  children,
 }: {
   id: string;
   label: string;
@@ -293,6 +417,9 @@ function ChoicePopover({
   onDraft: (values: string[]) => void;
   onApply: () => void;
   onClear?: () => void;
+  applyDisabled?: boolean;
+  // Extra fields under the choices
+  children?: ReactNode;
 }) {
   const choiceList = useLiveProperty("s-choice-list", "values", draft);
 
@@ -314,11 +441,13 @@ function ChoicePopover({
               </s-choice>
             ))}
           </s-choice-list>
+          {children}
           <s-stack direction="inline" gap="small-200">
             <s-button
               variant="primary"
               commandFor={id}
               command="--hide"
+              disabled={applyDisabled || undefined}
               onClick={onApply}
             >
               Apply

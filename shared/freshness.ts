@@ -51,6 +51,13 @@ function parseDateOnly(dateString: string): number {
   return utcMs;
 }
 
+/** The calendar date `days` after `date` (negative goes back), as "YYYY-MM-DD". */
+export function addDays(date: string, days: number): string {
+  return new Date(parseDateOnly(date) + days * MS_PER_DAY)
+    .toISOString()
+    .slice(0, 10);
+}
+
 export function isCalendarDate(dateString: string): boolean {
   try {
     parseDateOnly(dateString);

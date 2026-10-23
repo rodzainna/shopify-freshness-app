@@ -10,7 +10,20 @@ import {
   isPositiveWholeNumber,
   formatDaysRemaining,
   getEarliestExpirationDate,
+  addDays,
 } from "./freshness";
+
+describe("addDays", () => {
+  it.each([
+    ["2026-10-23", 7, "2026-10-30"],
+    ["2026-10-23", 30, "2026-11-22"],
+    ["2026-12-31", 1, "2027-01-01"],
+    ["2028-02-28", 1, "2028-02-29"],
+    ["2026-03-01", -1, "2026-02-28"],
+  ])("%s plus %i days is %s", (date, days, expected) => {
+    expect(addDays(date, days)).toBe(expected);
+  });
+});
 
 describe("computeBatchFreshness", () => {
   const today = "2026-09-12"; // fixed — never derived from new Date()
