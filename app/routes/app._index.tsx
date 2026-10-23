@@ -28,8 +28,11 @@ import {
   filterRows,
   hasActiveFilters,
   hasRowFilters,
+  type DashboardFilters,
+  type ProductSort,
   parseDashboardFilters,
   toProductQuery,
+  toProductSort,
 } from "../../shared/dashboard-filters";
 import { MAX_BATCHES } from "../../shared/product-metafields";
 
@@ -57,6 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const filters = parseDashboardFilters(new URL(request.url).searchParams);
   const query = toProductQuery(filters);
+  const sort = toProductSort(filters.sort);
   const pages = hasRowFilters(filters) ? ROW_FILTER_PAGES : 1;
 
   const rows: DashboardRow[] = [];
@@ -65,7 +69,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let after: string | null = null;
   let today = "";
   for (let page = 0; page < pages; page += 1) {
-    const data = await fetchProductPage(admin.graphql, query, after);
+    const data = await fetchProductPage(admin.graphql, {
+      query,
+      after,
+      ...sort,
+    });
     today = getShopToday(data.shop.ianaTimezone, new Date());
     rows.push(
       ...filterRows(toDashboardRows(data.products.nodes, today), filters),
@@ -87,8 +95,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 async function fetchProductPage(
   graphql: AdminGraphql,
-  query: string | null,
-  after: string | null,
+  variables: {
+    query: string | null;
+    after: string | null;
+  } & ProductSort,
 ): Promise<DashboardData> {
   const response = await graphql(
     `
@@ -98,6 +108,8 @@ async function fetchProductPage(
         $batchLimit: Int!
         $query: String
         $after: String
+        $sortKey: ProductSortKeys!
+        $reverse: Boolean!
       ) {
         shop {
           ianaTimezone
@@ -105,7 +117,8 @@ async function fetchProductPage(
         products(
           first: $productLimit
           after: $after
-          sortKey: TITLE
+          sortKey: $sortKey
+          reverse: $reverse
           query: $query
         ) {
           nodes {
@@ -155,8 +168,7 @@ async function fetchProductPage(
       variables: {
         productLimit: PRODUCT_LIMIT,
         batchLimit: MAX_BATCHES,
-        query,
-        after,
+        ...variables,
       },
     },
   );
@@ -332,7 +344,7 @@ export default function Dashboard() {
       </s-section>
       {hasMoreProducts && (
         <s-paragraph color="subdued">
-          {limitNote(rows.length, checkedProducts, hasRowFilters(filters))}
+          {limitNote(rows.length, checkedProducts, filters)}
         </s-paragraph>
       )}
       <BatchEditor target={editing} today={today} />
@@ -341,9 +353,10 @@ export default function Dashboard() {
   );
 }
 
-function limitNote(shown: number, checked: number, rowFilters: boolean) {
+function limitNote(shown: number, checked: number, filters: DashboardFilters) {
   if (shown >= PRODUCT_LIMIT) {
-    return `Showing the first ${PRODUCT_LIMIT} ${rowFilters ? "matching " : ""}products by title.`;
+    const matching = hasRowFilters(filters) ? "matching " : "";
+    return `Showing the first ${PRODUCT_LIMIT} ${matching}products in this sort order.`;
   }
   return `Status, stock and tracked filters checked the first ${checked} products. Search or filter by type or vendor to narrow it down.`;
 }

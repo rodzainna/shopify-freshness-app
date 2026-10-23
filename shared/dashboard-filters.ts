@@ -15,8 +15,32 @@ export const STOCK_FILTERS = {
   unbatched: "Unbatched (has batches)",
 } as const;
 
+// URL values for the sort, in the order they're listed
+export const SORTS = {
+  title: "Product A–Z",
+  "title-desc": "Product Z–A",
+  stock: "Stock: low to high",
+  "stock-desc": "Stock: high to low",
+  type: "Type A–Z",
+  vendor: "Vendor A–Z",
+} as const;
+
 export type StatusFilter = keyof typeof STATUS_FILTERS;
 export type StockFilter = keyof typeof STOCK_FILTERS;
+export type DashboardSort = keyof typeof SORTS;
+
+export const DEFAULT_SORT: DashboardSort = "title";
+
+export function isDashboardSort(value: string): value is DashboardSort {
+  return isKnown(SORTS, value);
+}
+
+function isKnown<K extends string>(
+  values: Record<K, string>,
+  value: string,
+): value is K {
+  return Object.hasOwn(values, value);
+}
 
 // Search and filters the dashboard reads from its URL, e.g. ?q=milk&status=expired
 export interface DashboardFilters {
@@ -27,6 +51,8 @@ export interface DashboardFilters {
   stock: StockFilter[];
   // Only products with batches
   tracked: boolean;
+  // Not a filter: Clear filters keeps it
+  sort: DashboardSort;
 }
 
 export const FILTER_PARAMS = {
@@ -37,6 +63,8 @@ export const FILTER_PARAMS = {
   stock: "stock",
   tracked: "tracked",
 };
+
+export const SORT_PARAM = "sort";
 
 export function parseDashboardFilters(
   params: URLSearchParams,
@@ -51,7 +79,7 @@ export function parseDashboardFilters(
   ];
   // Unknown values (an old or hand-edited URL) are ignored
   const known = <K extends string>(name: string, values: Record<K, string>) =>
-    list(name).filter((value): value is K => Object.hasOwn(values, value));
+    list(name).filter((value): value is K => isKnown(values, value));
   return {
     search: (params.get(FILTER_PARAMS.search) ?? "").trim(),
     types: list(FILTER_PARAMS.type),
@@ -59,7 +87,39 @@ export function parseDashboardFilters(
     statuses: known(FILTER_PARAMS.status, STATUS_FILTERS),
     stock: known(FILTER_PARAMS.stock, STOCK_FILTERS),
     tracked: params.get(FILTER_PARAMS.tracked) === "1",
+    sort: known(SORT_PARAM, SORTS)[0] ?? DEFAULT_SORT,
   };
+}
+
+export interface ProductSort {
+  sortKey: "TITLE" | "INVENTORY_TOTAL" | "PRODUCT_TYPE" | "VENDOR";
+  reverse: boolean;
+}
+
+// Every sort needs an entry, so a new one can't reach Shopify without a key
+const PRODUCT_SORTS = {
+  title: { sortKey: "TITLE", reverse: false },
+  "title-desc": { sortKey: "TITLE", reverse: true },
+  stock: { sortKey: "INVENTORY_TOTAL", reverse: false },
+  "stock-desc": { sortKey: "INVENTORY_TOTAL", reverse: true },
+  type: { sortKey: "PRODUCT_TYPE", reverse: false },
+  vendor: { sortKey: "VENDOR", reverse: false },
+} as const satisfies Record<DashboardSort, ProductSort>;
+
+/** The products query's sortKey and reverse for a sort. */
+export function toProductSort(sort: DashboardSort): ProductSort {
+  return PRODUCT_SORTS[sort];
+}
+
+/** Sets the sort in a dashboard URL; the default is left out. */
+export function applySort(params: URLSearchParams, sort: DashboardSort): void {
+  if (sort === DEFAULT_SORT) params.delete(SORT_PARAM);
+  else params.set(SORT_PARAM, sort);
+}
+
+/** Removes the search and every filter, keeping the sort and the app's own params. */
+export function clearFilters(params: URLSearchParams): void {
+  for (const name of Object.values(FILTER_PARAMS)) params.delete(name);
 }
 
 export function hasActiveFilters(filters: DashboardFilters): boolean {

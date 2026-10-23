@@ -8,9 +8,15 @@ import {
 
 import {
   type DashboardFilters,
+  type DashboardSort,
   FILTER_PARAMS,
+  SORTS,
   STATUS_FILTERS,
   STOCK_FILTERS,
+  applySort,
+  clearFilters,
+  isDashboardSort,
+  parseDashboardFilters,
 } from "../shared/dashboard-filters";
 import type { FilterOptions } from "./routes/app.filter-options";
 
@@ -23,6 +29,7 @@ interface Option {
 
 const STATUS_OPTIONS = toOptions(STATUS_FILTERS);
 const STOCK_OPTIONS = toOptions(STOCK_FILTERS);
+const SORT_OPTIONS = toOptions(SORTS);
 
 type UpdateParams = (params: URLSearchParams) => void;
 
@@ -40,6 +47,9 @@ export function useDashboardFilters(filters: DashboardFilters) {
 
   const [text, setText] = useState(filters.search);
   const timer = useRef<ReturnType<typeof setTimeout>>();
+  // A sort picked in the last moment, before its navigation starts
+  const [sortDraft, setSortDraft] = useState<DashboardSort | null>(null);
+  const sortTimer = useRef<ReturnType<typeof setTimeout>>();
 
   // Follow the URL (Back, Clear filters), but keep what's typed when it matches
   useEffect(() => {
@@ -49,7 +59,13 @@ export function useDashboardFilters(filters: DashboardFilters) {
     );
   }, [filters.search]);
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      clearTimeout(sortTimer.current);
+    },
+    [],
+  );
 
   function update(change: UpdateParams, replace = false) {
     const params = new URLSearchParams(latestSearch.current);
@@ -78,17 +94,31 @@ export function useDashboardFilters(filters: DashboardFilters) {
     });
   }
 
+  // Waits like search, so arrowing through the choices loads only the last one
+  function setSort(sort: DashboardSort) {
+    setSortDraft(sort);
+    clearTimeout(sortTimer.current);
+    sortTimer.current = setTimeout(() => {
+      sortTimer.current = undefined;
+      setSortDraft(null);
+      update((params) => applySort(params, sort));
+    }, SEARCH_DELAY_MS);
+  }
+
   function clearAll() {
     // A search still waiting to run would bring its text back
     clearTimeout(timer.current);
     timer.current = undefined;
     setText("");
-    update((params) => {
-      for (const name of Object.values(FILTER_PARAMS)) params.delete(name);
-    });
+    update(clearFilters);
   }
 
-  return { text, search, setFilter, clearAll };
+  // From the newest URL, so a cancelled navigation can't leave a stale sort shown
+  const sort =
+    sortDraft ??
+    parseDashboardFilters(new URLSearchParams(latestSearch.current)).sort;
+
+  return { text, sort, search, setFilter, setSort, clearAll };
 }
 
 export type DashboardFilterControls = ReturnType<typeof useDashboardFilters>;
@@ -161,7 +191,51 @@ export function DashboardFilterBar({
           )
         }
       />
+      <SortButton sort={controls.sort} onSort={controls.setSort} />
     </s-stack>
+  );
+}
+
+const SORT_POPOVER_ID = "sort-popover";
+
+// Applies a choice at once; the popover stays open until a click outside
+function SortButton({
+  sort,
+  onSort,
+}: {
+  sort: DashboardSort;
+  onSort: (sort: DashboardSort) => void;
+}) {
+  const choiceList = useLiveProperty("s-choice-list", "values", [sort]);
+
+  return (
+    <>
+      <s-button
+        icon="sort"
+        commandFor={SORT_POPOVER_ID}
+        accessibilityLabel={`Sort: ${SORTS[sort]}`}
+      >
+        {SORTS[sort]}
+      </s-button>
+      <s-popover id={SORT_POPOVER_ID}>
+        <s-box padding="base">
+          <s-choice-list
+            ref={choiceList}
+            label="Sort by"
+            onChange={(event) => {
+              const [value] = event.currentTarget.values;
+              if (value && isDashboardSort(value)) onSort(value);
+            }}
+          >
+            {SORT_OPTIONS.map((option) => (
+              <s-choice key={option.value} value={option.value}>
+                {option.label}
+              </s-choice>
+            ))}
+          </s-choice-list>
+        </s-box>
+      </s-popover>
+    </>
   );
 }
 
