@@ -34,6 +34,7 @@ export const SORTS = {
   "type-desc": "Type Z–A",
   vendor: "Vendor A–Z",
   "vendor-desc": "Vendor Z–A",
+  expiry: "Earliest expiry: soonest first",
 } as const;
 
 export type StatusFilter = keyof typeof STATUS_FILTERS;
@@ -191,11 +192,31 @@ const PRODUCT_SORTS = {
   "type-desc": { sortKey: "PRODUCT_TYPE", reverse: true },
   vendor: { sortKey: "VENDOR", reverse: false },
   "vendor-desc": { sortKey: "VENDOR", reverse: true },
+  // Shopify can't sort by a metafield, so these are fetched by title and sorted here
+  expiry: { sortKey: "TITLE", reverse: false },
 } as const satisfies Record<DashboardSort, ProductSort>;
 
 /** The products query's sortKey and reverse for a sort. */
 export function toProductSort(sort: DashboardSort): ProductSort {
   return PRODUCT_SORTS[sort];
+}
+
+/** True for sorts the app applies to the products it loaded. */
+export function isAppSort(sort: DashboardSort): boolean {
+  return sort === "expiry";
+}
+
+/** Soonest earliest expiry first; products with no date keep their order at the end. */
+export function sortRowsByExpiry(rows: DashboardRow[]): DashboardRow[] {
+  // Array sort is stable, so equal dates keep the order Shopify returned
+  return [...rows].sort((a, b) => {
+    const dateA = a.earliestExpirationDate;
+    const dateB = b.earliestExpirationDate;
+    if (dateA === dateB) return 0;
+    if (dateA === null) return 1;
+    if (dateB === null) return -1;
+    return dateA < dateB ? -1 : 1;
+  });
 }
 
 /** Sets the sort in a dashboard URL; the default is left out. */
@@ -251,6 +272,8 @@ function hasStockIssue(row: DashboardRow, issue: StockFilter): boolean {
 
 // The app's own metafield, which the definition marks admin-filterable
 const EARLIEST_EXPIRY_FIELD = "metafields.$app.earliest_expiration_date";
+// Before every real expiry, so ">=" this means "has an expiry date"
+const ANY_EXPIRY = "1900-01-01";
 
 /**
  * Shopify search syntax for the filters, or null when there are none.
@@ -269,6 +292,10 @@ export function toProductQuery(
   if (filters.vendors.length > 0) parts.push(anyOf("vendor", filters.vendors));
   if (expiry?.from) parts.push(`${EARLIEST_EXPIRY_FIELD}:>=${expiry.from}`);
   if (expiry?.to) parts.push(`${EARLIEST_EXPIRY_FIELD}:<=${expiry.to}`);
+  // The expiry sort lists only dated products, so its 200 aren't spent on others
+  if (isAppSort(filters.sort) && !expiry?.from && !expiry?.to) {
+    parts.push(`${EARLIEST_EXPIRY_FIELD}:>=${ANY_EXPIRY}`);
+  }
   return parts.length > 0 ? parts.join(" AND ") : null;
 }
 

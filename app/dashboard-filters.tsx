@@ -22,6 +22,7 @@ import {
   isExpiryPreset,
   parseSort,
 } from "../shared/dashboard-filters";
+import { isCalendarDate } from "../shared/freshness";
 import type { FilterOptions } from "./routes/app.filter-options";
 
 const SEARCH_DELAY_MS = 300;
@@ -138,7 +139,7 @@ export function DashboardFilterBar({
   const trackedBox = useLiveProperty("s-checkbox", "checked", filters.tracked);
 
   return (
-    <s-stack slot="filters" direction="inline" gap="small-200">
+    <s-stack slot="filters" gap="small-200">
       <s-search-field
         ref={searchField}
         label="Search products"
@@ -146,51 +147,69 @@ export function DashboardFilterBar({
         placeholder="Search products"
         onInput={(event) => controls.search(event.currentTarget.value)}
       />
-      <FilterButton
-        id="status-filter"
-        label="Status"
-        options={STATUS_OPTIONS}
-        selected={filters.statuses}
-        onApply={(values) => controls.setFilter(FILTER_PARAMS.status, values)}
-      />
-      <FilterButton
-        id="stock-filter"
-        label="Stock"
-        options={STOCK_OPTIONS}
-        selected={filters.stock}
-        onApply={(values) => controls.setFilter(FILTER_PARAMS.stock, values)}
-      />
-      <ExpiryFilterButton
-        expiry={filters.expiry}
-        onApply={controls.setExpiry}
-      />
-      <FilterButton
-        id="type-filter"
-        label="Type"
-        options={options.data?.types.map(sameLabel)}
-        selected={filters.types}
-        onOpen={loadOptions}
-        onApply={(values) => controls.setFilter(FILTER_PARAMS.type, values)}
-      />
-      <FilterButton
-        id="vendor-filter"
-        label="Vendor"
-        options={options.data?.vendors.map(sameLabel)}
-        selected={filters.vendors}
-        onOpen={loadOptions}
-        onApply={(values) => controls.setFilter(FILTER_PARAMS.vendor, values)}
-      />
-      <s-checkbox
-        ref={trackedBox}
-        label="Tracked only"
-        onChange={(event) =>
-          controls.setFilter(
-            FILTER_PARAMS.tracked,
-            event.currentTarget.checked ? ["1"] : [],
-          )
-        }
-      />
-      <SortButton sort={controls.sort} onSort={controls.setSort} />
+      {/* Filters on the left; the tracked toggle and sort on the right */}
+      <s-stack
+        direction="inline"
+        justifyContent="space-between"
+        alignItems="center"
+        gap="small-200"
+      >
+        <s-stack direction="inline" gap="small-200">
+          <FilterButton
+            id="status-filter"
+            label="Status"
+            options={STATUS_OPTIONS}
+            selected={filters.statuses}
+            onApply={(values) =>
+              controls.setFilter(FILTER_PARAMS.status, values)
+            }
+          />
+          <FilterButton
+            id="stock-filter"
+            label="Stock"
+            options={STOCK_OPTIONS}
+            selected={filters.stock}
+            onApply={(values) =>
+              controls.setFilter(FILTER_PARAMS.stock, values)
+            }
+          />
+          <FilterButton
+            id="type-filter"
+            label="Type"
+            options={options.data?.types.map(sameLabel)}
+            selected={filters.types}
+            onOpen={loadOptions}
+            onApply={(values) => controls.setFilter(FILTER_PARAMS.type, values)}
+          />
+          <FilterButton
+            id="vendor-filter"
+            label="Vendor"
+            options={options.data?.vendors.map(sameLabel)}
+            selected={filters.vendors}
+            onOpen={loadOptions}
+            onApply={(values) =>
+              controls.setFilter(FILTER_PARAMS.vendor, values)
+            }
+          />
+          <ExpiryFilterButton
+            expiry={filters.expiry}
+            onApply={controls.setExpiry}
+          />
+        </s-stack>
+        <s-stack direction="inline" gap="base" alignItems="center">
+          <s-checkbox
+            ref={trackedBox}
+            label="Tracked only"
+            onChange={(event) =>
+              controls.setFilter(
+                FILTER_PARAMS.tracked,
+                event.currentTarget.checked ? ["1"] : [],
+              )
+            }
+          />
+          <SortButton sort={controls.sort} onSort={controls.setSort} />
+        </s-stack>
+      </s-stack>
     </s-stack>
   );
 }
@@ -334,21 +353,22 @@ function ExpiryFilterButton({
         onDraft={setChoice}
         onApply={apply}
         onClear={() => onApply(null)}
-        // A custom range needs a date; Clear removes the filter
-        applyDisabled={choice[0] === CUSTOM_RANGE && !from && !to}
+        // A custom range needs a real date; Clear removes the filter
+        applyDisabled={
+          choice[0] === CUSTOM_RANGE &&
+          ((!from && !to) || !isDateOrEmpty(from) || !isDateOrEmpty(to))
+        }
       >
         {choice[0] === CUSTOM_RANGE && (
           <s-stack gap="small-200">
             <s-date-field
               ref={fromField}
               label="From"
-              value={from}
               onChange={(event) => setFrom(event.currentTarget.value)}
             />
             <s-date-field
               ref={toField}
               label="To"
-              value={to}
               onChange={(event) => setTo(event.currentTarget.value)}
             />
           </s-stack>
@@ -356,6 +376,10 @@ function ExpiryFilterButton({
       </ChoicePopover>
     </>
   );
+}
+
+function isDateOrEmpty(value: string): boolean {
+  return value === "" || isCalendarDate(value);
 }
 
 // "Expiry", "Expiry: Next 7 days" or "Expiry: 2026-10-01 – 2026-10-31"

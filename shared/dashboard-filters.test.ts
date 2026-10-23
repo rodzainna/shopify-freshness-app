@@ -14,6 +14,8 @@ import {
   applyExpiry,
   clearFilters,
   presetRange,
+  isAppSort,
+  sortRowsByExpiry,
 } from "./dashboard-filters";
 
 const none: DashboardFilters = {
@@ -26,6 +28,25 @@ const none: DashboardFilters = {
   expiry: null,
   sort: DEFAULT_SORT,
 };
+
+const row = (overrides: Partial<DashboardRow>): DashboardRow => ({
+  id: "gid://shopify/Product/1",
+  title: "Product",
+  adminUrl: "shopify://admin/products/1",
+  imageUrl: null,
+  earliestExpirationDate: null,
+  tracked: false,
+  status: "Not set",
+  batches: [],
+  hiddenBatches: 0,
+  hasMoreBatches: false,
+  stock: null,
+  batchTotal: 0,
+  uncountedBatches: 0,
+  overStock: null,
+  unbatchedStock: null,
+  ...overrides,
+});
 
 describe("parseDashboardFilters", () => {
   it("reads the search, types and vendors, keeping the app's other params out", () => {
@@ -88,6 +109,49 @@ describe("applySort and clearFilters", () => {
 
     clearFilters(params);
     expect(params.toString()).toBe("shop=x.myshopify.com&sort=stock-desc");
+  });
+});
+
+describe("earliest expiry sort", () => {
+  it("asks Shopify only for products with an expiry date", () => {
+    expect(toProductQuery({ ...none, sort: "expiry" })).toBe(
+      "metafields.$app.earliest_expiration_date:>=1900-01-01",
+    );
+    // An expiry range already implies a date
+    expect(
+      toProductQuery(
+        { ...none, sort: "expiry" },
+        { from: null, to: "2026-11-01" },
+      ),
+    ).toBe("metafields.$app.earliest_expiration_date:<=2026-11-01");
+    expect(toProductQuery({ ...none, sort: "stock" })).toBeNull();
+  });
+
+  it("is applied by the app, fetching by title", () => {
+    expect(isAppSort("expiry")).toBe(true);
+    expect(isAppSort("stock")).toBe(false);
+    expect(toProductSort("expiry")).toStrictEqual({
+      sortKey: "TITLE",
+      reverse: false,
+    });
+  });
+
+  it("puts the soonest first and products without a date last, in their order", () => {
+    const rows = [
+      row({ id: "none-a", earliestExpirationDate: null }),
+      row({ id: "nov", earliestExpirationDate: "2026-11-15" }),
+      row({ id: "oct", earliestExpirationDate: "2026-10-19" }),
+      row({ id: "none-b", earliestExpirationDate: null }),
+      row({ id: "oct-too", earliestExpirationDate: "2026-10-19" }),
+    ];
+
+    expect(sortRowsByExpiry(rows).map(({ id }) => id)).toStrictEqual([
+      "oct",
+      "oct-too",
+      "nov",
+      "none-a",
+      "none-b",
+    ]);
   });
 });
 
@@ -246,24 +310,6 @@ describe("row filters", () => {
     ).toBe(false);
   });
 
-  const row = (overrides: Partial<DashboardRow>): DashboardRow => ({
-    id: "gid://shopify/Product/1",
-    title: "Product",
-    adminUrl: "shopify://admin/products/1",
-    imageUrl: null,
-    earliestExpirationDate: null,
-    tracked: false,
-    status: "Not set",
-    batches: [],
-    hiddenBatches: 0,
-    hasMoreBatches: false,
-    stock: null,
-    batchTotal: 0,
-    uncountedBatches: 0,
-    overStock: null,
-    unbatchedStock: null,
-    ...overrides,
-  });
   const batch = {
     id: "gid://shopify/Metaobject/1",
     quantity: 1,
