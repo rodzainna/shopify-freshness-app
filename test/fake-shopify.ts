@@ -1,4 +1,5 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+import type { ProductInventory } from "../shared/inventory";
 
 interface FakeBatch {
   quantity: number;
@@ -26,6 +27,8 @@ export const listDigest = (batchIds: string[]) =>
 export function fakeShopify({ delayMs = 0 } = {}) {
   const products = new Map<string, FakeProduct>();
   const batches = new Map<string, FakeBatch>();
+  // Untracked unless a test sets it
+  const inventories = new Map<string, ProductInventory>();
   // Handle → id, for batches created by handle
   const handles = new Map<string, string>();
   let nextBatchNumber = 1000;
@@ -53,6 +56,13 @@ export function fakeShopify({ delayMs = 0 } = {}) {
 
   const answer: Record<string, (variables: Variables) => unknown> = {
     GetShopTimezone: () => ({ shop: { ianaTimezone: "UTC" } }),
+    GetProductInventory: ({ productId }) => {
+      if (!products.has(productId as string)) return { product: null };
+      const inventory = inventories.get(productId as string);
+      return {
+        product: inventory ?? { tracksInventory: false, totalInventory: 0 },
+      };
+    },
     GetProductBatches: ({ productId }) => {
       const product = products.get(productId as string);
       if (!product) return { product: null };
@@ -236,6 +246,9 @@ export function fakeShopify({ delayMs = 0 } = {}) {
     // Gives a stored batch the handle it was created under
     setHandle(id: string, handle: string) {
       handles.set(handle, id);
+    },
+    setInventory(productId: string, inventory: ProductInventory) {
+      inventories.set(productId, inventory);
     },
     setQuantity(id: string, quantity: number) {
       batches.get(id)!.quantity = quantity;

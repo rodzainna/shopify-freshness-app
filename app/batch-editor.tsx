@@ -17,8 +17,17 @@ import {
   formatDaysRemaining,
   isCalendarDate,
 } from "../shared/freshness";
+import {
+  type ProductInventory,
+  compareStock,
+  matchesStock,
+} from "../shared/inventory";
 import { MAX_BATCHES } from "../shared/product-metafields";
-import { MAX_QUANTITY, type BatchErrors } from "../shared/validation";
+import {
+  MAX_QUANTITY,
+  type BatchErrors,
+  hasErrors,
+} from "../shared/validation";
 
 export const BATCH_EDITOR_ID = "batch-editor";
 
@@ -34,7 +43,9 @@ export interface EditTarget {
   openedAt: number;
 }
 
-type Loaded = { batches: EditableBatch[] } | { message: string };
+type Loaded =
+  | { batches: EditableBatch[]; inventory: ProductInventory | null }
+  | { message: string };
 type Notice = { tone: "warning" | "critical"; message: string };
 
 /** One modal for the dashboard, opened by a row's Edit or Add batches button. */
@@ -58,6 +69,8 @@ export function BatchEditor({
   const [notice, setNotice] = useState<Notice | null>(null);
   // The current product's batches loaded, so rows can be added
   const [ready, setReady] = useState(false);
+  // Read with the batches; a save doesn't change it
+  const [inventory, setInventory] = useState<ProductInventory | null>(null);
   // Remounts the fields, since their value attributes only set a starting value
   const [formVersion, setFormVersion] = useState(0);
 
@@ -87,6 +100,7 @@ export function BatchEditor({
     handled.current.target = target;
     setNotice(null);
     setReady(false);
+    setInventory(null);
     reset([]);
     load.load(`/app/batches?productId=${encodeURIComponent(target.productId)}`);
   }, [target, load]);
@@ -99,6 +113,7 @@ export function BatchEditor({
     handled.current.loaded = loaded;
     if ("batches" in loaded) {
       reset(loaded.batches);
+      setInventory(loaded.inventory);
       setReady(true);
       // A product without batches opens with one row to fill in
       if (loaded.batches.length === 0) setAdded([newBatch()]);
@@ -125,7 +140,7 @@ export function BatchEditor({
         setNotice({ tone: "critical", message: result.message });
         return;
       case "changed":
-        // New rows are dropped too: some may have landed and now be listed
+        // New rows go too: a save whose response was lost may have listed them
         reset(result.batches);
         setNotice({
           tone: "warning",
@@ -186,6 +201,11 @@ export function BatchEditor({
 
   function removeNew(handle: string) {
     setAdded((batches) => batches.filter((batch) => batch.handle !== handle));
+    setErrors((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([key]) => key !== handle),
+      ),
+    );
   }
 
   function submit() {
@@ -236,7 +256,7 @@ export function BatchEditor({
               onChange={(change) => update(batch.id, change)}
             />
           ))}
-          {added.map((batch) => (
+          {added.map((batch, index) => (
             <BatchRow
               key={batch.handle}
               batch={batch}
@@ -245,9 +265,19 @@ export function BatchEditor({
               disabled={saving}
               onChange={(change) => updateNew(batch.handle, change)}
               onRemove={() => removeNew(batch.handle)}
+              removeLabel={`Remove new batch ${index + 1}`}
             />
           ))}
         </s-stack>
+        {ready && inventory && (
+          <StockSummary
+            // Rows with no quantity yet don't hide the unbatched count
+            batches={[...edited, ...added].filter(
+              ({ quantity }) => !Number.isNaN(quantity),
+            )}
+            inventory={inventory}
+          />
+        )}
         {ready && (
           <s-stack direction="inline" gap="small-200" alignItems="center">
             <s-button
@@ -284,14 +314,48 @@ export function BatchEditor({
   );
 }
 
+// The dashboard's In batches flags, live as the form changes
+function StockSummary({
+  batches,
+  inventory,
+}: {
+  batches: Batch[];
+  inventory: ProductInventory;
+}) {
+  const comparison = compareStock(batches, inventory);
+  const { batchTotal, uncountedBatches, overStock, unbatchedStock } =
+    comparison;
+  const stock = inventory.tracksInventory
+    ? `Stock ${inventory.totalInventory}`
+    : "Stock not tracked";
+  return (
+    <s-stack direction="inline" gap="small-200" alignItems="center">
+      <s-text>
+        {stock} · In batches {batchTotal}
+      </s-text>
+      {uncountedBatches > 0 && (
+        <s-text color="subdued">({uncountedBatches} not counted)</s-text>
+      )}
+      {overStock !== null && <s-badge tone="warning">{overStock} over</s-badge>}
+      {unbatchedStock !== null && (
+        <s-badge tone="info">{unbatchedStock} unbatched</s-badge>
+      )}
+      {matchesStock(comparison, inventory, batches.length) && (
+        <s-badge tone="success">Matches stock</s-badge>
+      )}
+    </s-stack>
+  );
+}
+
 function addLimitNote(existing: number): string {
-  return maxNewBatches(existing) < MAX_NEW_BATCHES_PER_SAVE
+  return MAX_BATCHES - existing <= MAX_NEW_BATCHES_PER_SAVE
     ? `A product can have at most ${MAX_BATCHES} batches.`
     : `Save these ${MAX_NEW_BATCHES_PER_SAVE} first to add more.`;
 }
 
 function newBatch(): NewBatch {
-  return { handle: crypto.randomUUID(), quantity: 0, expirationDate: "" };
+  // NaN leaves the quantity field empty
+  return { handle: crypto.randomUUID(), quantity: NaN, expirationDate: "" };
 }
 
 function BatchRow({
@@ -301,6 +365,7 @@ function BatchRow({
   disabled,
   onChange,
   onRemove,
+  removeLabel,
 }: {
   batch: Batch;
   errors?: BatchErrors;
@@ -309,6 +374,7 @@ function BatchRow({
   onChange: (change: Partial<Batch>) => void;
   // Only new rows; removing a saved batch is left to the product panel
   onRemove?: () => void;
+  removeLabel?: string;
 }) {
   const freshness = isCalendarDate(batch.expirationDate)
     ? computeBatchFreshness(batch.expirationDate, today)
@@ -317,19 +383,20 @@ function BatchRow({
     <s-grid
       gridTemplateColumns={ROW_COLUMNS}
       columnGap="base"
-      alignItems="start"
+      // A field's error text makes it taller, so then the badge stays at the top
+      alignItems={hasErrors(errors) ? "start" : "center"}
     >
       <s-number-field
         label="Quantity"
         labelAccessibilityVisibility="exclusive"
-        value={String(batch.quantity)}
+        value={Number.isNaN(batch.quantity) ? "" : String(batch.quantity)}
         min={1}
         max={MAX_QUANTITY}
         step={1}
         error={errors.quantity}
         disabled={disabled || undefined}
-        onInput={(event) =>
-          onChange({ quantity: Number(event.currentTarget.value) })
+        onInput={({ currentTarget: { value } }) =>
+          onChange({ quantity: value === "" ? NaN : Number(value) })
         }
       />
       <s-date-field
@@ -355,7 +422,7 @@ function BatchRow({
             icon="delete"
             variant="tertiary"
             tone="critical"
-            accessibilityLabel="Remove batch"
+            accessibilityLabel={removeLabel}
             disabled={disabled || undefined}
             onClick={onRemove}
           />

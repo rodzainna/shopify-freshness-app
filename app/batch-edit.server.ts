@@ -7,6 +7,7 @@ import {
   deleteBatches,
   findListedHandles,
   readProductBatches,
+  readProductInventory,
   saveBatchList,
   saveEarliestExpirationDate,
   upsertBatches,
@@ -22,6 +23,7 @@ import {
   sameValues,
 } from "../shared/batch-edit";
 import { getEarliestExpirationDate } from "../shared/freshness";
+import type { ProductInventory } from "../shared/inventory";
 import type { BatchErrors } from "../shared/validation";
 
 export type BatchEditResult =
@@ -50,19 +52,33 @@ type EditableRead =
     }
   | { message: string };
 
-/** The product's batches for the editor, or why they can't be edited. */
+/**
+ * The product's batches for the editor, or why they can't be edited. Stock is
+ * only shown, so it's null when it can't be read rather than blocking edits.
+ */
 export async function loadBatches(
   admin: AdminApiContext,
   productId: string,
 ): Promise<
-  | { batches: EditableBatch[]; earliestExpirationDate: string | null }
+  | {
+      batches: EditableBatch[];
+      earliestExpirationDate: string | null;
+      inventory: ProductInventory | null;
+    }
   | { message: string }
 > {
-  const read = await readForEdit(admin, productId);
+  const [read, inventory] = await Promise.all([
+    readForEdit(admin, productId),
+    readProductInventory(admin, productId).catch((error) => {
+      console.error(`Reading ${productId}'s stock failed`, error);
+      return null;
+    }),
+  ]);
   if ("message" in read) return read;
   return {
     batches: read.batches,
     earliestExpirationDate: read.earliestExpirationDate,
+    inventory,
   };
 }
 

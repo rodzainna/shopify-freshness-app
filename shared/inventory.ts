@@ -61,6 +61,21 @@ export function compareStock(
   };
 }
 
+/** From compareStock: every batch is counted and nothing is over or unbatched. */
+export function matchesStock(
+  { uncountedBatches, overStock, unbatchedStock }: StockComparison,
+  inventory: ProductInventory,
+  batchCount: number,
+): boolean {
+  return (
+    inventory.tracksInventory &&
+    batchCount > 0 &&
+    uncountedBatches === 0 &&
+    overStock === null &&
+    unbatchedStock === null
+  );
+}
+
 // The panel's over-stock message, from compareStock
 export function getInventoryMismatch(
   batches: Batch[],
