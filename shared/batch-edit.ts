@@ -132,6 +132,22 @@ export function validateNewBatches(
   return collectErrors(batches, validateBatch, ({ handle }) => handle);
 }
 
+/** Errors for a whole save: opened batches by id, new ones by handle. */
+export function validateBatchEdit(
+  edited: EditableBatch[],
+  added: NewBatch[],
+): Record<string, BatchErrors> {
+  return { ...validateEdits(edited), ...validateNewBatches(added) };
+}
+
+/** How many new batches one save can add to a product holding `existing`. */
+export function maxNewBatches(existing: number): number {
+  return Math.max(
+    0,
+    Math.min(MAX_NEW_BATCHES_PER_SAVE, MAX_BATCHES - existing),
+  );
+}
+
 function collectErrors<T extends Batch>(
   batches: T[],
   validate: (batch: T) => BatchErrors,
@@ -166,7 +182,7 @@ export function planBatchEdit(
     );
   }
 
-  const errors = { ...validateEdits(edited), ...validateNewBatches(added) };
+  const errors = validateBatchEdit(edited, added);
   if (Object.keys(errors).length > 0) return { kind: "invalid", errors };
 
   if (!sameBatches(opened, current)) return { kind: "changed" };

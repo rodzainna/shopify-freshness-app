@@ -6,6 +6,8 @@ import {
   MAX_NEW_BATCHES_PER_SAVE,
   applyEdits,
   isBatchHandle,
+  maxNewBatches,
+  validateBatchEdit,
   validateNewBatches,
   parseBatchEditRequest,
   planBatchEdit,
@@ -216,6 +218,35 @@ describe("validateNewBatches", () => {
         expirationDate: "Enter an expiry date",
       },
     });
+  });
+});
+
+describe("validateBatchEdit", () => {
+  it("combines opened batches' errors by id with new ones' by handle", () => {
+    expect(
+      validateBatchEdit(
+        [loaf("gid://shopify/Metaobject/1", 0, "2026-11-01")],
+        [fresh(HANDLE, 2, "")],
+      ),
+    ).toStrictEqual({
+      "gid://shopify/Metaobject/1": {
+        quantity:
+          "Must be at least 1. To remove a batch, use the product panel.",
+      },
+      [HANDLE]: { expirationDate: "Enter an expiry date" },
+    });
+  });
+});
+
+describe("maxNewBatches", () => {
+  it.each([
+    [0, MAX_NEW_BATCHES_PER_SAVE],
+    [MAX_BATCHES - MAX_NEW_BATCHES_PER_SAVE, MAX_NEW_BATCHES_PER_SAVE],
+    [MAX_BATCHES - 3, 3],
+    [MAX_BATCHES, 0],
+    [MAX_BATCHES + 1, 0],
+  ])("allows %i existing batches %i more", (existing, max) => {
+    expect(maxNewBatches(existing)).toBe(max);
   });
 });
 

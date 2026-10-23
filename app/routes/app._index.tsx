@@ -298,21 +298,22 @@ export default function Dashboard() {
                   </s-stack>
                 </s-table-cell>
                 <s-table-cell>
-                  {row.tracked && row.status !== UNREADABLE && (
+                  {row.status !== UNREADABLE && (
                     <s-button
                       variant="tertiary"
                       commandFor={BATCH_EDITOR_ID}
                       command="--show"
-                      accessibilityLabel={`Edit batches for ${row.title}`}
+                      accessibilityLabel={`${row.tracked ? "Edit" : "Add"} batches for ${row.title}`}
                       onClick={() =>
                         setEditing({
                           productId: row.id,
                           title: row.title,
+                          hasBatches: row.tracked,
                           openedAt: Date.now(),
                         })
                       }
                     >
-                      Edit batches
+                      {row.tracked ? "Edit batches" : "Add batches"}
                     </s-button>
                   )}
                 </s-table-cell>
