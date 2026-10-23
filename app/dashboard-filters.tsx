@@ -12,10 +12,12 @@ import {
   EXPIRY_PRESETS,
   type ExpiryFilter,
   FILTER_PARAMS,
+  PAGE_PARAM,
   SORTS,
   STATUS_FILTERS,
   STOCK_FILTERS,
   applyExpiry,
+  applyPage,
   applySort,
   clearFilters,
   isDashboardSort,
@@ -73,6 +75,8 @@ export function useDashboardFilters(filters: DashboardFilters) {
 
   function update(change: UpdateParams, replace = false) {
     const params = new URLSearchParams(latestSearch.current);
+    // Any change shows a different list, so it starts again at page 1
+    params.delete(PAGE_PARAM);
     change(params);
     latestSearch.current = `?${params}`;
     navigate({ search: latestSearch.current }, { replace });
@@ -102,6 +106,10 @@ export function useDashboardFilters(filters: DashboardFilters) {
     update((params) => applyExpiry(params, expiry));
   }
 
+  function setPage(page: number) {
+    update((params) => applyPage(params, page));
+  }
+
   function setSort(next: DashboardSort) {
     if (next !== sort) update((params) => applySort(params, next));
   }
@@ -114,7 +122,16 @@ export function useDashboardFilters(filters: DashboardFilters) {
     update(clearFilters);
   }
 
-  return { text, sort, search, setFilter, setExpiry, setSort, clearAll };
+  return {
+    text,
+    sort,
+    search,
+    setFilter,
+    setExpiry,
+    setSort,
+    setPage,
+    clearAll,
+  };
 }
 
 export type DashboardFilterControls = ReturnType<typeof useDashboardFilters>;

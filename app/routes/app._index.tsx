@@ -9,6 +9,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { BATCH_EDITOR_ID, BatchEditor, type EditTarget } from "../batch-editor";
 import { StockBadges } from "../stock-badges";
+import { Pager } from "../pager";
 import { DashboardFilterBar, useDashboardFilters } from "../dashboard-filters";
 import { authenticate } from "../shopify.server";
 import { readShopToday } from "../fulfillment-shopify.server";
@@ -40,6 +41,12 @@ import {
   toProductSort,
 } from "../../shared/dashboard-filters";
 import { MAX_BATCHES } from "../../shared/product-metafields";
+import {
+  clampPage,
+  findPageStart,
+  pageCount,
+  pageSlice,
+} from "../../shared/pagination";
 
 // Rows per page. Batches load up to the panel's limit, so totals are complete
 // unless a product has more; at 250 a page requests 269 of 1,000 points.
@@ -49,12 +56,37 @@ const PRODUCT_LIMIT = 50;
 // matches: about 1,076 of the 2,000 points Shopify's bucket holds
 const ROW_FILTER_PAGES = 4;
 
+// Cursor-only queries reach a later page this many products at a time
+const CURSOR_PAGE = 250;
+
 interface DashboardData {
   shop: { ianaTimezone: string };
+  // Only when asked for with $withCount
+  productsCount?: { count: number };
   products: {
     nodes: DashboardProductNode[];
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
   };
+}
+
+interface CursorData {
+  productsCount?: { count: number };
+  products: {
+    edges: { cursor: string }[];
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+type ProductView = { query: string | null } & ProductSort;
+
+interface DashboardPage {
+  rows: DashboardRow[];
+  page: number;
+  totalPages: number;
+  // Only for views the app filters or sorts, which check a limited number
+  checkedProducts: number | null;
+  uncheckedProducts: boolean;
+  today: string;
 }
 
 type AdminGraphql = Awaited<
@@ -68,43 +100,108 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const now = new Date();
   const { expiry, presetToday } = await resolveExpiry(admin, filters, now);
   const query = toProductQuery(filters, expiry);
-  const sort = toProductSort(filters.sort);
-  const appSort = isAppSort(filters.sort);
-  const pages = hasRowFilters(filters) || appSort ? ROW_FILTER_PAGES : 1;
+  const view = { query, ...toProductSort(filters.sort) };
+  const page =
+    hasRowFilters(filters) || isAppSort(filters.sort)
+      ? await loadCheckedPage(admin.graphql, view, filters, presetToday, now)
+      : await loadShopifyPage(
+          admin.graphql,
+          view,
+          filters.page,
+          presetToday,
+          now,
+        );
+  return { ...page, filters };
+};
 
+// Shopify pages the list: find where the page starts, then load just that page
+async function loadShopifyPage(
+  graphql: AdminGraphql,
+  view: ProductView,
+  requestedPage: number,
+  presetToday: string | null,
+  now: Date,
+): Promise<DashboardPage> {
+  const start =
+    requestedPage > 1
+      ? await findPageStart(
+          async (after, first, withCount) => {
+            const data = await fetchCursors(graphql, {
+              ...view,
+              after,
+              first,
+              withCount,
+            });
+            return {
+              count: data.productsCount?.count ?? null,
+              cursors: data.products.edges.map(({ cursor }) => cursor),
+              ...data.products.pageInfo,
+            };
+          },
+          requestedPage,
+          PRODUCT_LIMIT,
+          CURSOR_PAGE,
+        )
+      : { page: 1, after: null, count: null };
+  // Page 1 counts here; a later page already counted while finding its start
+  const data = await fetchProductPage(graphql, {
+    ...view,
+    after: start.after,
+    withCount: start.count === null,
+  });
+  const today = presetToday ?? getShopToday(data.shop.ianaTimezone, now);
+  const count = start.count ?? data.productsCount?.count ?? 0;
+  return {
+    rows: toDashboardRows(data.products.nodes, today),
+    page: start.page,
+    totalPages: pageCount(count, PRODUCT_LIMIT),
+    checkedProducts: null,
+    uncheckedProducts: false,
+    today,
+  };
+}
+
+// Filters or an expiry sort the app applies: check up to 200, then slice a page
+async function loadCheckedPage(
+  graphql: AdminGraphql,
+  view: ProductView,
+  filters: DashboardFilters,
+  presetToday: string | null,
+  now: Date,
+): Promise<DashboardPage> {
   const rows: DashboardRow[] = [];
   let checkedProducts = 0;
-  let hasMoreProducts = false;
+  let uncheckedProducts = false;
   let after: string | null = null;
   let today = "";
-  for (let page = 0; page < pages; page += 1) {
-    const data = await fetchProductPage(admin.graphql, {
-      query,
+  for (let page = 0; page < ROW_FILTER_PAGES; page += 1) {
+    const data = await fetchProductPage(graphql, {
+      ...view,
       after,
-      ...sort,
+      withCount: false,
     });
     today = presetToday ?? getShopToday(data.shop.ianaTimezone, now);
     rows.push(
       ...filterRows(toDashboardRows(data.products.nodes, today), filters),
     );
     checkedProducts += data.products.nodes.length;
-    hasMoreProducts = data.products.pageInfo.hasNextPage;
+    uncheckedProducts = data.products.pageInfo.hasNextPage;
     after = data.products.pageInfo.endCursor;
-    // An app sort needs every page it can check, or a later page's rows are missed
-    if (!hasMoreProducts || (!appSort && rows.length >= PRODUCT_LIMIT)) break;
+    if (!uncheckedProducts) break;
   }
 
-  const sorted = appSort ? sortRowsByExpiry(rows) : rows;
+  const ordered = isAppSort(filters.sort) ? sortRowsByExpiry(rows) : rows;
+  const totalPages = pageCount(ordered.length, PRODUCT_LIMIT);
+  const page = clampPage(filters.page, totalPages);
   return {
-    rows: sorted.slice(0, PRODUCT_LIMIT),
-    hasMoreProducts: hasMoreProducts || rows.length > PRODUCT_LIMIT,
-    // Shopify has products the loader didn't check
-    uncheckedProducts: hasMoreProducts,
+    rows: pageSlice(ordered, page, PRODUCT_LIMIT),
+    page,
+    totalPages,
     checkedProducts,
-    filters,
+    uncheckedProducts,
     today,
   };
-};
+}
 
 // A preset like "Next 7 days" counts from the shop's own date
 async function resolveExpiry(
@@ -123,12 +220,54 @@ async function resolveExpiry(
   };
 }
 
+async function fetchCursors(
+  graphql: AdminGraphql,
+  variables: ProductView & {
+    after: string | null;
+    first: number;
+    withCount: boolean;
+  },
+): Promise<CursorData> {
+  const response = await graphql(
+    `
+      #graphql
+      query DashboardCursors(
+        $first: Int!
+        $query: String
+        $after: String
+        $sortKey: ProductSortKeys!
+        $reverse: Boolean!
+        $withCount: Boolean!
+      ) {
+        productsCount(query: $query, limit: null) @include(if: $withCount) {
+          count
+        }
+        products(
+          first: $first
+          after: $after
+          sortKey: $sortKey
+          reverse: $reverse
+          query: $query
+        ) {
+          edges {
+            cursor
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    `,
+    { variables },
+  );
+  const { data } = (await response.json()) as { data: CursorData };
+  return data;
+}
+
 async function fetchProductPage(
   graphql: AdminGraphql,
-  variables: {
-    query: string | null;
-    after: string | null;
-  } & ProductSort,
+  variables: ProductView & { after: string | null; withCount: boolean },
 ): Promise<DashboardData> {
   const response = await graphql(
     `
@@ -140,9 +279,13 @@ async function fetchProductPage(
         $after: String
         $sortKey: ProductSortKeys!
         $reverse: Boolean!
+        $withCount: Boolean!
       ) {
         shop {
           ianaTimezone
+        }
+        productsCount(query: $query, limit: null) @include(if: $withCount) {
+          count
         }
         products(
           first: $productLimit
@@ -210,7 +353,8 @@ async function fetchProductPage(
 export default function Dashboard() {
   const {
     rows,
-    hasMoreProducts,
+    page,
+    totalPages,
     uncheckedProducts,
     checkedProducts,
     filters,
@@ -383,15 +527,16 @@ export default function Dashboard() {
             )}
           </s-box>
         )}
+        <Pager page={page} pageCount={totalPages} onPage={controls.setPage} />
       </s-section>
       {isAppSort(filters.sort) && rows.length > 0 && (
         <s-paragraph color="subdued">
           Products without an expiry date aren&apos;t listed in this sort.
         </s-paragraph>
       )}
-      {hasMoreProducts && (
+      {uncheckedProducts && checkedProducts !== null && (
         <s-paragraph color="subdued">
-          {limitNote(rows.length, checkedProducts, uncheckedProducts, filters)}
+          {limitNote(checkedProducts, filters)}
         </s-paragraph>
       )}
       <BatchEditor target={editing} today={today} />
@@ -400,18 +545,10 @@ export default function Dashboard() {
   );
 }
 
-function limitNote(
-  shown: number,
-  checked: number,
-  unchecked: boolean,
-  filters: DashboardFilters,
-) {
-  if (unchecked && isAppSort(filters.sort)) {
+// Views the app filters or sorts only check so many products
+function limitNote(checked: number, filters: DashboardFilters) {
+  if (isAppSort(filters.sort)) {
     return `Sorted the first ${checked} products with an expiry date. Filter by expiry or search to narrow it down.`;
-  }
-  if (shown >= PRODUCT_LIMIT) {
-    const matching = hasRowFilters(filters) ? "matching " : "";
-    return `Showing the first ${PRODUCT_LIMIT} ${matching}products in this sort order.`;
   }
   return `Status, stock and tracked filters checked the first ${checked} products. Search or filter by type or vendor to narrow it down.`;
 }

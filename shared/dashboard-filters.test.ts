@@ -12,6 +12,7 @@ import {
   DEFAULT_SORT,
   applySort,
   applyExpiry,
+  applyPage,
   clearFilters,
   presetRange,
   isAppSort,
@@ -27,6 +28,7 @@ const none: DashboardFilters = {
   tracked: false,
   expiry: null,
   sort: DEFAULT_SORT,
+  page: 1,
 };
 
 const row = (overrides: Partial<DashboardRow>): DashboardRow => ({
@@ -89,6 +91,32 @@ describe("parseDashboardFilters", () => {
         parseDashboardFilters(new URLSearchParams("sort=vendor")),
       ),
     ).toBe(false);
+  });
+});
+
+describe("page", () => {
+  const pageOf = (search: string) =>
+    parseDashboardFilters(new URLSearchParams(search)).page;
+
+  it("reads a whole page number from 1, else page 1", () => {
+    expect(pageOf("page=3")).toBe(3);
+    expect(pageOf("")).toBe(1);
+    expect(pageOf("page=0")).toBe(1);
+    expect(pageOf("page=2.5")).toBe(1);
+    expect(pageOf("page=two")).toBe(1);
+  });
+
+  it("leaves page 1 out of the URL", () => {
+    const params = new URLSearchParams("q=milk");
+
+    applyPage(params, 4);
+    expect(params.toString()).toBe("q=milk&page=4");
+    applyPage(params, 1);
+    expect(params.toString()).toBe("q=milk");
+  });
+
+  it("doesn't count as a filter", () => {
+    expect(hasActiveFilters({ ...none, page: 3 })).toBe(false);
   });
 });
 
