@@ -8,6 +8,10 @@ import {
   hasRowFilters,
   parseDashboardFilters,
   toProductQuery,
+  toProductSort,
+  DEFAULT_SORT,
+  applySort,
+  clearFilters,
 } from "./dashboard-filters";
 
 const none: DashboardFilters = {
@@ -17,6 +21,7 @@ const none: DashboardFilters = {
   statuses: [],
   stock: [],
   tracked: false,
+  sort: DEFAULT_SORT,
 };
 
 describe("parseDashboardFilters", () => {
@@ -44,6 +49,57 @@ describe("parseDashboardFilters", () => {
 
     expect(filters).toStrictEqual(none);
     expect(hasActiveFilters(filters)).toBe(false);
+  });
+  it("reads the sort, and falls back to Product A–Z for an unknown one", () => {
+    const sortOf = (search: string) =>
+      parseDashboardFilters(new URLSearchParams(search)).sort;
+
+    expect(sortOf("sort=stock-desc")).toBe("stock-desc");
+    expect(sortOf("sort=price")).toBe("title");
+    expect(sortOf("")).toBe("title");
+  });
+
+  it("doesn't count the sort as a filter", () => {
+    expect(
+      hasActiveFilters(
+        parseDashboardFilters(new URLSearchParams("sort=vendor")),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("applySort and clearFilters", () => {
+  it("leaves the default sort out of the URL", () => {
+    const params = new URLSearchParams("sort=stock&q=milk");
+
+    applySort(params, "vendor");
+    expect(params.get("sort")).toBe("vendor");
+    applySort(params, DEFAULT_SORT);
+    expect(params.toString()).toBe("q=milk");
+  });
+
+  it("keeps the sort and the app's params when the filters are cleared", () => {
+    const params = new URLSearchParams(
+      "shop=x.myshopify.com&q=milk&type=Dairy&vendor=Acme&status=expired&stock=over&tracked=1&sort=stock-desc",
+    );
+
+    clearFilters(params);
+    expect(params.toString()).toBe("shop=x.myshopify.com&sort=stock-desc");
+  });
+});
+
+describe("toProductSort", () => {
+  it.each([
+    ["title", "TITLE", false],
+    ["title-desc", "TITLE", true],
+    ["stock", "INVENTORY_TOTAL", false],
+    ["stock-desc", "INVENTORY_TOTAL", true],
+    ["type", "PRODUCT_TYPE", false],
+    ["type-desc", "PRODUCT_TYPE", true],
+    ["vendor", "VENDOR", false],
+    ["vendor-desc", "VENDOR", true],
+  ] as const)("sorts %s by %s, reversed: %s", (sort, sortKey, reverse) => {
+    expect(toProductSort(sort)).toStrictEqual({ sortKey, reverse });
   });
 });
 
