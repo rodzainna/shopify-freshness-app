@@ -23,6 +23,7 @@ import {
   matchesStock,
 } from "../shared/inventory";
 import { MAX_BATCHES } from "../shared/product-metafields";
+import { StockBadges } from "./stock-badges";
 import {
   MAX_QUANTITY,
   type BatchErrors,
@@ -69,15 +70,13 @@ export function BatchEditor({
   const [notice, setNotice] = useState<Notice | null>(null);
   // The current product's batches loaded, so rows can be added
   const [ready, setReady] = useState(false);
-  // Read with the batches; a save doesn't change it
-  const [inventory, setInventory] = useState<ProductInventory | null>(null);
   // Remounts the fields, since their value attributes only set a starting value
   const [formVersion, setFormVersion] = useState(0);
 
-  function reset(batches: EditableBatch[]) {
+  function reset(batches: EditableBatch[], added: NewBatch[] = []) {
     setOpened(batches);
     setEdited(batches);
-    setAdded([]);
+    setAdded(added);
     setErrors({});
     setFormVersion((version) => version + 1);
   }
@@ -100,7 +99,6 @@ export function BatchEditor({
     handled.current.target = target;
     setNotice(null);
     setReady(false);
-    setInventory(null);
     reset([]);
     load.load(`/app/batches?productId=${encodeURIComponent(target.productId)}`);
   }, [target, load]);
@@ -112,11 +110,8 @@ export function BatchEditor({
     }
     handled.current.loaded = loaded;
     if ("batches" in loaded) {
-      reset(loaded.batches);
-      setInventory(loaded.inventory);
+      reset(loaded.batches, startingRows(loaded.batches));
       setReady(true);
-      // A product without batches opens with one row to fill in
-      if (loaded.batches.length === 0) setAdded([newBatch()]);
     } else setNotice({ tone: "critical", message: loaded.message });
   }, [load.state, load.data]);
 
@@ -141,7 +136,7 @@ export function BatchEditor({
         return;
       case "changed":
         // New rows go too: a save whose response was lost may have listed them
-        reset(result.batches);
+        reset(result.batches, startingRows(result.batches));
         setNotice({
           tone: "warning",
           message:
@@ -223,6 +218,9 @@ export function BatchEditor({
 
   const loading = load.state !== "idle";
   const saving = save.state !== "idle";
+  // Read with the batches; a save doesn't change it
+  const inventory =
+    ready && load.data && "inventory" in load.data ? load.data.inventory : null;
   const rowCount = edited.length + added.length;
   const atAddLimit = added.length >= maxNewBatches(edited.length);
   // The dashboard row may be stale, so loaded batches decide once they're in
@@ -271,10 +269,11 @@ export function BatchEditor({
         </s-stack>
         {ready && inventory && (
           <StockSummary
-            // Rows with no quantity yet don't hide the unbatched count
-            batches={[...edited, ...added].filter(
-              ({ quantity }) => !Number.isNaN(quantity),
-            )}
+            // New rows with no quantity yet don't hide the unbatched count
+            batches={[
+              ...edited,
+              ...added.filter(({ quantity }) => !Number.isNaN(quantity)),
+            ]}
             inventory={inventory}
           />
         )}
@@ -314,7 +313,7 @@ export function BatchEditor({
   );
 }
 
-// The dashboard's In batches flags, live as the form changes
+// The dashboard's stock flags, live as the form changes
 function StockSummary({
   batches,
   inventory,
@@ -322,9 +321,10 @@ function StockSummary({
   batches: Batch[];
   inventory: ProductInventory;
 }) {
-  const comparison = compareStock(batches, inventory);
-  const { batchTotal, uncountedBatches, overStock, unbatchedStock } =
-    comparison;
+  const comparison = compareStock(batches, inventory, {
+    emptyIsUnbatched: true,
+  });
+  const { batchTotal, uncountedBatches } = comparison;
   const stock = inventory.tracksInventory
     ? `Stock ${inventory.totalInventory}`
     : "Stock not tracked";
@@ -336,10 +336,7 @@ function StockSummary({
       {uncountedBatches > 0 && (
         <s-text color="subdued">({uncountedBatches} not counted)</s-text>
       )}
-      {overStock !== null && <s-badge tone="warning">{overStock} over</s-badge>}
-      {unbatchedStock !== null && (
-        <s-badge tone="info">{unbatchedStock} unbatched</s-badge>
-      )}
+      <StockBadges {...comparison} />
       {matchesStock(comparison, inventory, batches.length) && (
         <s-badge tone="success">Matches stock</s-badge>
       )}
@@ -351,6 +348,11 @@ function addLimitNote(existing: number): string {
   return MAX_BATCHES - existing <= MAX_NEW_BATCHES_PER_SAVE
     ? `A product can have at most ${MAX_BATCHES} batches.`
     : `Save these ${MAX_NEW_BATCHES_PER_SAVE} first to add more.`;
+}
+
+// A product without batches starts with one row to fill in
+function startingRows(batches: EditableBatch[]): NewBatch[] {
+  return batches.length === 0 ? [newBatch()] : [];
 }
 
 function newBatch(): NewBatch {

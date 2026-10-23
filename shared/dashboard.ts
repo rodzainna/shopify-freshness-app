@@ -117,7 +117,7 @@ export function toDashboardRows(
       batches: batches.slice(0, SHOWN_BATCHES),
       hiddenBatches: Math.max(0, batches.length - SHOWN_BATCHES),
       hasMoreBatches,
-      ...compareStock(batches, product, !hasMoreBatches),
+      ...compareStock(batches, product, { complete: !hasMoreBatches }),
     };
   });
 }

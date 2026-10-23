@@ -8,6 +8,7 @@ import { useLoaderData, useLocation, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { BATCH_EDITOR_ID, BatchEditor, type EditTarget } from "../batch-editor";
+import { StockBadges } from "../stock-badges";
 import { DashboardFilterBar, useDashboardFilters } from "../dashboard-filters";
 import { authenticate } from "../shopify.server";
 import {
@@ -208,6 +209,7 @@ export default function Dashboard() {
             <s-table-header>Earliest expiry</s-table-header>
             <s-table-header>Stock</s-table-header>
             <s-table-header>In batches</s-table-header>
+            <s-table-header>Stock check</s-table-header>
             <s-table-header>Batches</s-table-header>
             <s-table-header>
               <s-text accessibilityVisibility="exclusive">Actions</s-text>
@@ -245,18 +247,14 @@ export default function Dashboard() {
                         ({row.uncountedBatches} not counted)
                       </s-text>
                     )}
-                    {row.overStock !== null && (
-                      <s-badge tone="warning">
-                        {row.overStock}
-                        {row.hasMoreBatches && "+"} over
-                      </s-badge>
-                    )}
-                    {row.unbatchedStock !== null && (
-                      <s-badge tone="info">
-                        {row.unbatchedStock} unbatched
-                      </s-badge>
-                    )}
                   </s-stack>
+                </s-table-cell>
+                <s-table-cell>
+                  <StockBadges
+                    overStock={row.overStock}
+                    unbatchedStock={row.unbatchedStock}
+                    partial={row.hasMoreBatches}
+                  />
                 </s-table-cell>
                 <s-table-cell>
                   <s-stack gap="small-200">

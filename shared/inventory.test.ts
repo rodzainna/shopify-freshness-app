@@ -124,7 +124,9 @@ describe("compareStock", () => {
   });
 
   it("still flags over stock when not every batch loaded", () => {
-    expect(compareStock(batches(30), tracked(25), false)).toMatchObject({
+    expect(
+      compareStock(batches(30), tracked(25), { complete: false }),
+    ).toMatchObject({
       overStock: 5,
       unbatchedStock: null,
     });
@@ -132,12 +134,18 @@ describe("compareStock", () => {
 
   it("doesn't call stock unbatched when not every batch loaded", () => {
     expect(
-      compareStock(batches(8), tracked(10), false).unbatchedStock,
+      compareStock(batches(8), tracked(10), { complete: false }).unbatchedStock,
     ).toBeNull();
   });
 
   it("doesn't call stock unbatched when the product has no batches", () => {
     expect(compareStock([], tracked(50)).unbatchedStock).toBeNull();
+  });
+
+  it("calls all stock unbatched for a form adding the first batches", () => {
+    expect(
+      compareStock([], tracked(50), { emptyIsUnbatched: true }).unbatchedStock,
+    ).toBe(50);
   });
 
   it("flags nothing when inventory isn't tracked", () => {
