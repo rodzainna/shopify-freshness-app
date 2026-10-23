@@ -24,7 +24,10 @@ It's a portfolio project, built to show custom Shopify app work end to end. It r
 
 **Dashboard** (the app's home page)
 
-- Each product's overall status, earliest expiry and a per-batch breakdown. Sold-out batches are marked as such. It shows the first 50 products by title and up to 10 batches each.
+- Each product's overall status, earliest expiry and a per-batch breakdown, with a thumbnail and a link to its admin page. Sold-out batches are marked as such. It shows 50 products at a time by title, and up to 10 batches each.
+- Stock next to the units in batches, with a **Stock check** column that flags batches over stock ("5 over") or stock no batch covers ("8 unbatched").
+- Search, plus filters for type, vendor, status, stock check and tracked products. Filters live in the URL. The status, stock check and tracked filters look through up to 200 products.
+- An editor per product: change batch quantities and dates, or add new batches (up to 25 per save), including to a product that has none. A running total of stock and batch units updates as you type. Saves take the product's lock and refuse if the batches changed since the editor opened. Removing a batch stays in the product panel.
 - An empty state when the store has no products.
 
 **Privacy page** (`/app/privacy`)
@@ -38,6 +41,7 @@ Product page panel ──writes──▶ freshness_batch metaobjects (quantity, 
                                product metafields: freshness_batches (list of batches)
                                                    earliest_expiration_date (readable in Liquid)
 Dashboard ──reads──▶ the same metaobjects and metafields through the Admin GraphQL API
+Dashboard editor ──writes──▶ the same, under the per-product lock
 
 fulfillments/create webhook ─▶ verify HMAC ─▶ skip duplicates ─▶ group line items by product
                             ─▶ save a job ─▶ reply 200
@@ -88,7 +92,8 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 
 ```
 app/
-  routes/        dashboard, privacy page, auth, webhook handlers
+  routes/        dashboard, batch editor endpoint, privacy page, auth, webhook handlers
+  batch-edit.server.ts           load and save the dashboard editor's batches
   fulfillment-jobs.server.ts     save, run, retry and sweep fulfillment jobs
   fulfillment.server.ts          apply a fulfillment to each product's batches
   fulfillment-shopify.server.ts  read and write batches through the Admin API
