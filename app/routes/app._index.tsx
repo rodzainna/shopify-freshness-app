@@ -83,9 +83,8 @@ interface DashboardPage {
   rows: DashboardRow[];
   page: number;
   totalPages: number;
-  // Only for views the app filters or sorts, which check a limited number
-  checkedProducts: number | null;
-  uncheckedProducts: boolean;
+  // Views the app filters or sorts check a limited number of products
+  checked: { products: number; more: boolean } | null;
   today: string;
 }
 
@@ -155,8 +154,7 @@ async function loadShopifyPage(
     rows: toDashboardRows(data.products.nodes, today),
     page: start.page,
     totalPages: pageCount(count, PRODUCT_LIMIT),
-    checkedProducts: null,
-    uncheckedProducts: false,
+    checked: null,
     today,
   };
 }
@@ -197,8 +195,7 @@ async function loadCheckedPage(
     rows: pageSlice(ordered, page, PRODUCT_LIMIT),
     page,
     totalPages,
-    checkedProducts,
-    uncheckedProducts,
+    checked: { products: checkedProducts, more: uncheckedProducts },
     today,
   };
 }
@@ -351,15 +348,8 @@ async function fetchProductPage(
 }
 
 export default function Dashboard() {
-  const {
-    rows,
-    page,
-    totalPages,
-    uncheckedProducts,
-    checkedProducts,
-    filters,
-    today,
-  } = useLoaderData<typeof loader>();
+  const { rows, page, totalPages, checked, filters, today } =
+    useLoaderData<typeof loader>();
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const controls = useDashboardFilters(filters);
   const location = useLocation();
@@ -527,16 +517,21 @@ export default function Dashboard() {
             )}
           </s-box>
         )}
-        <Pager page={page} pageCount={totalPages} onPage={controls.setPage} />
+        <Pager
+          page={page}
+          pageCount={totalPages}
+          onPage={controls.setPage}
+          onStep={controls.stepPage}
+        />
       </s-section>
       {isAppSort(filters.sort) && rows.length > 0 && (
         <s-paragraph color="subdued">
           Products without an expiry date aren&apos;t listed in this sort.
         </s-paragraph>
       )}
-      {uncheckedProducts && checkedProducts !== null && (
+      {checked?.more && (
         <s-paragraph color="subdued">
-          {limitNote(checkedProducts, filters)}
+          {limitNote(checked.products, filters)}
         </s-paragraph>
       )}
       <BatchEditor target={editing} today={today} />

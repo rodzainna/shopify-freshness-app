@@ -3,10 +3,12 @@ export function Pager({
   page,
   pageCount,
   onPage,
+  onStep,
 }: {
   page: number;
   pageCount: number;
   onPage: (page: number) => void;
+  onStep: (delta: number) => void;
 }) {
   if (pageCount <= 1) return null;
   const pages = Array.from({ length: pageCount }, (_, index) => index + 1);
@@ -22,7 +24,7 @@ export function Pager({
         <s-button
           icon="chevron-left"
           accessibilityLabel="Previous page"
-          onClick={() => onPage(page - 1)}
+          onClick={() => onStep(-1)}
         />
       )}
       <s-text>Page</s-text>
@@ -47,7 +49,7 @@ export function Pager({
         <s-button
           icon="chevron-right"
           accessibilityLabel="Next page"
-          onClick={() => onPage(page + 1)}
+          onClick={() => onStep(1)}
         />
       )}
     </s-stack>

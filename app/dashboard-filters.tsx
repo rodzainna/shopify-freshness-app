@@ -22,6 +22,7 @@ import {
   clearFilters,
   isDashboardSort,
   isExpiryPreset,
+  parsePage,
   parseSort,
 } from "../shared/dashboard-filters";
 import { isCalendarDate } from "../shared/freshness";
@@ -110,6 +111,12 @@ export function useDashboardFilters(filters: DashboardFilters) {
     update((params) => applyPage(params, page));
   }
 
+  // From the newest URL, so a second quick click goes one page further
+  function stepPage(delta: number) {
+    const current = parsePage(new URLSearchParams(latestSearch.current));
+    setPage(Math.max(1, current + delta));
+  }
+
   function setSort(next: DashboardSort) {
     if (next !== sort) update((params) => applySort(params, next));
   }
@@ -130,6 +137,7 @@ export function useDashboardFilters(filters: DashboardFilters) {
     setExpiry,
     setSort,
     setPage,
+    stepPage,
     clearAll,
   };
 }

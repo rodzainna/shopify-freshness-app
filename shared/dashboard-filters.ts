@@ -98,8 +98,8 @@ export function presetRange(preset: ExpiryPreset, today: string): ExpiryRange {
   }
 }
 
-// A whole number from 1; anything else is page 1
-function parsePage(params: URLSearchParams): number {
+/** The URL's page: a whole number from 1, anything else is page 1. */
+export function parsePage(params: URLSearchParams): number {
   const page = Number(params.get(PAGE_PARAM)?.trim());
   return Number.isInteger(page) && page >= 1 ? page : 1;
 }

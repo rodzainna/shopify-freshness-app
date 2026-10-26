@@ -27,11 +27,7 @@ export interface CursorBatch {
   endCursor: string | null;
 }
 
-/**
- * The cursor just before `requestedPage`, read `batchSize` cursors at a time.
- * The first batch's count turns a page past the end into the last page; if
- * the cursors run out sooner (items deleted meanwhile), the last real page.
- */
+/** The cursor just before `requestedPage`; a page past the end becomes the last real page. */
 export async function findPageStart(
   fetchCursors: (
     after: string | null,
@@ -47,6 +43,7 @@ export async function findPageStart(
   let offset = pageOffset(page, pageSize);
   let count = 0;
   let after: string | null = null;
+  let ended = false;
   while (cursors.length < offset) {
     const first = cursors.length === 0;
     const batch = await fetchCursors(
@@ -61,9 +58,11 @@ export async function findPageStart(
     }
     cursors.push(...batch.cursors);
     after = batch.endCursor;
-    if (!batch.hasNextPage) break;
+    ended = !batch.hasNextPage;
+    if (ended) break;
   }
-  if (cursors.length < offset) {
+  // Nothing after the offset means the page would be empty
+  if (cursors.length < offset || (ended && cursors.length === offset)) {
     count = cursors.length;
     page = clampPage(page, pageCount(count, pageSize));
     offset = pageOffset(page, pageSize);

@@ -124,6 +124,17 @@ describe("findPageStart", () => {
     });
   });
 
+  it("falls back when the list ends exactly where the page would start", async () => {
+    // Counted 150 (3 pages), but only 100 are left
+    const { fetchCursors } = list(100, 150);
+
+    expect(await findPageStart(fetchCursors, 3, 50, 250)).toStrictEqual({
+      page: 2,
+      after: "c50",
+      count: 100,
+    });
+  });
+
   it("goes to page 1 when there's nothing to skip", async () => {
     const { fetchCursors } = list(30);
 
