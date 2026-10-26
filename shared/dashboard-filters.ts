@@ -263,9 +263,11 @@ export function isAppSort(sort: DashboardSort): boolean {
 }
 
 /** Soonest earliest expiry first; products with no date keep their order at the end. */
-export function sortRowsByExpiry(rows: DashboardRow[]): DashboardRow[] {
+export function sortByExpiry<
+  T extends Pick<DashboardRow, "earliestExpirationDate">,
+>(items: T[]): T[] {
   // Array sort is stable, so equal dates keep the order Shopify returned
-  return [...rows].sort((a, b) => {
+  return [...items].sort((a, b) => {
     const dateA = a.earliestExpirationDate;
     const dateB = b.earliestExpirationDate;
     if (dateA === dateB) return 0;
@@ -348,7 +350,7 @@ export function toProductQuery(
   if (filters.vendors.length > 0) parts.push(anyOf("vendor", filters.vendors));
   if (expiry?.from) parts.push(`${EARLIEST_EXPIRY_FIELD}:>=${expiry.from}`);
   if (expiry?.to) parts.push(`${EARLIEST_EXPIRY_FIELD}:<=${expiry.to}`);
-  // The expiry sort lists only dated products, so its 200 aren't spent on others
+  // The expiry sort lists only dated products, so its 1,000 aren't spent on others
   if (isAppSort(filters.sort) && !expiry?.from && !expiry?.to) {
     parts.push(`${EARLIEST_EXPIRY_FIELD}:>=${ANY_EXPIRY}`);
   }

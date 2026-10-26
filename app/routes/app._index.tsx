@@ -18,6 +18,7 @@ import {
   type DashboardRow,
   ADMIN_PRODUCTS,
   UNREADABLE,
+  earliestDateOf,
   toDashboardRows,
 } from "../../shared/dashboard";
 import {
@@ -32,7 +33,7 @@ import {
   hasRowFilters,
   isAppSort,
   presetRange,
-  sortRowsByExpiry,
+  sortByExpiry,
   type DashboardFilters,
   type ExpiryRange,
   type ProductSort,
@@ -59,6 +60,9 @@ const ROW_FILTER_PAGES = 4;
 // Cursor-only queries reach a later page this many products at a time
 const CURSOR_PAGE = 250;
 
+// The expiry sort reads dates alone, 250 at a time: 1,000 for about 96 points
+const DATE_PAGES = 4;
+
 interface ProductList {
   // Only when asked for with $withCount
   productsCount?: { count: number };
@@ -74,6 +78,18 @@ interface DashboardData extends ProductList {
 
 interface CursorData extends ProductList {
   products: ProductList["products"] & { edges: { cursor: string }[] };
+}
+
+type ProductDate = Pick<DashboardProductNode, "id" | "earliestExpiration">;
+
+interface DatesData extends ProductList {
+  products: ProductList["products"] & { nodes: ProductDate[] };
+}
+
+interface RowsByIdData {
+  shop: { ianaTimezone: string };
+  // null for a product deleted since its id was read
+  nodes: (DashboardProductNode | null)[];
 }
 
 type ProductView = { query: string | null } & ProductSort;
@@ -99,9 +115,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { expiry, presetToday } = await resolveExpiry(admin, filters, now);
   const query = toProductQuery(filters, expiry);
   const view = { query, ...toProductSort(filters.sort) };
-  const page =
-    hasRowFilters(filters) || isAppSort(filters.sort)
-      ? await loadCheckedPage(admin.graphql, view, filters, presetToday, now)
+  const page = hasRowFilters(filters)
+    ? await loadCheckedPage(admin.graphql, view, filters, presetToday, now)
+    : isAppSort(filters.sort)
+      ? await loadExpirySortedPage(
+          admin.graphql,
+          view,
+          filters.page,
+          presetToday,
+          now,
+        )
       : await loadShopifyPage(
           admin.graphql,
           view,
@@ -158,7 +181,47 @@ async function loadShopifyPage(
   };
 }
 
-// Filters or an expiry sort the app applies: check up to 200, then slice a page
+// The expiry sort: read dates cheaply, sort them, then load only this page's rows
+async function loadExpirySortedPage(
+  graphql: AdminGraphql,
+  view: ProductView,
+  requestedPage: number,
+  presetToday: string | null,
+  now: Date,
+): Promise<DashboardPage> {
+  const dated: { id: string; earliestExpirationDate: string | null }[] = [];
+  let uncheckedProducts = false;
+  let after: string | null = null;
+  for (let request = 0; request < DATE_PAGES; request += 1) {
+    const data = await fetchProductDates(graphql, { ...view, after });
+    for (const node of data.products.nodes) {
+      dated.push({
+        id: node.id,
+        earliestExpirationDate: earliestDateOf(node),
+      });
+    }
+    uncheckedProducts = data.products.pageInfo.hasNextPage;
+    after = data.products.pageInfo.endCursor;
+    if (!uncheckedProducts) break;
+  }
+
+  const ordered = sortByExpiry(dated);
+  const totalPages = pageCount(ordered.length, PRODUCT_LIMIT);
+  const page = clampPage(requestedPage, totalPages);
+  const ids = pageSlice(ordered, page, PRODUCT_LIMIT).map(({ id }) => id);
+  const data = await fetchProductsById(graphql, ids);
+  const today = presetToday ?? getShopToday(data.shop.ianaTimezone, now);
+  const products = data.nodes.filter((node) => node !== null);
+  return {
+    rows: toDashboardRows(products, today),
+    page,
+    totalPages,
+    checked: { products: dated.length, more: uncheckedProducts },
+    today,
+  };
+}
+
+// Status, stock or tracked filters the app applies: check up to 200, then slice a page
 async function loadCheckedPage(
   graphql: AdminGraphql,
   view: ProductView,
@@ -187,7 +250,8 @@ async function loadCheckedPage(
     if (!uncheckedProducts) break;
   }
 
-  const ordered = isAppSort(filters.sort) ? sortRowsByExpiry(rows) : rows;
+  // The expiry sort with these filters still needs every product's batches
+  const ordered = isAppSort(filters.sort) ? sortByExpiry(rows) : rows;
   const totalPages = pageCount(ordered.length, PRODUCT_LIMIT);
   const page = clampPage(filters.page, totalPages);
   return {
@@ -215,6 +279,46 @@ async function resolveExpiry(
     presetToday: today,
   };
 }
+
+// The fields a dashboard row needs; $batchLimit caps the batches read
+const PRODUCT_ROW_FIELDS = `#graphql
+  fragment DashboardProductRow on Product {
+    id
+    legacyResourceId
+    title
+    tracksInventory
+    totalInventory
+    featuredMedia {
+      preview {
+        image {
+          url(transform: { maxWidth: 80, maxHeight: 80 })
+          altText
+        }
+      }
+    }
+    earliestExpiration: metafield(key: "earliest_expiration_date") {
+      value
+    }
+    freshnessBatches: metafield(key: "freshness_batches") {
+      references(first: $batchLimit) {
+        nodes {
+          ... on Metaobject {
+            id
+            quantity: field(key: "quantity") {
+              value
+            }
+            expirationDate: field(key: "expiration_date") {
+              value
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+        }
+      }
+    }
+  }
+`;
 
 async function fetchCursors(
   graphql: AdminGraphql,
@@ -261,6 +365,69 @@ async function fetchCursors(
   return data;
 }
 
+async function fetchProductDates(
+  graphql: AdminGraphql,
+  variables: ProductView & { after: string | null },
+): Promise<DatesData> {
+  const response = await graphql(
+    `
+      #graphql
+      query DashboardExpiryDates(
+        $first: Int!
+        $query: String
+        $after: String
+        $sortKey: ProductSortKeys!
+        $reverse: Boolean!
+      ) {
+        products(
+          first: $first
+          after: $after
+          sortKey: $sortKey
+          reverse: $reverse
+          query: $query
+        ) {
+          nodes {
+            id
+            earliestExpiration: metafield(key: "earliest_expiration_date") {
+              value
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    `,
+    { variables: { first: CURSOR_PAGE, ...variables } },
+  );
+  const { data } = (await response.json()) as { data: DatesData };
+  return data;
+}
+
+async function fetchProductsById(
+  graphql: AdminGraphql,
+  ids: string[],
+): Promise<RowsByIdData> {
+  const response = await graphql(
+    `
+      #graphql
+      query DashboardRowsById($ids: [ID!]!, $batchLimit: Int!) {
+        shop {
+          ianaTimezone
+        }
+        nodes(ids: $ids) {
+          ...DashboardProductRow
+        }
+      }
+      ${PRODUCT_ROW_FIELDS}
+    `,
+    { variables: { ids, batchLimit: MAX_BATCHES } },
+  );
+  const { data } = (await response.json()) as { data: RowsByIdData };
+  return data;
+}
+
 async function fetchProductPage(
   graphql: AdminGraphql,
   variables: ProductView & { after: string | null; withCount: boolean },
@@ -291,40 +458,7 @@ async function fetchProductPage(
           query: $query
         ) {
           nodes {
-            id
-            legacyResourceId
-            title
-            tracksInventory
-            totalInventory
-            featuredMedia {
-              preview {
-                image {
-                  url(transform: { maxWidth: 80, maxHeight: 80 })
-                  altText
-                }
-              }
-            }
-            earliestExpiration: metafield(key: "earliest_expiration_date") {
-              value
-            }
-            freshnessBatches: metafield(key: "freshness_batches") {
-              references(first: $batchLimit) {
-                nodes {
-                  ... on Metaobject {
-                    id
-                    quantity: field(key: "quantity") {
-                      value
-                    }
-                    expirationDate: field(key: "expiration_date") {
-                      value
-                    }
-                  }
-                }
-                pageInfo {
-                  hasNextPage
-                }
-              }
-            }
+            ...DashboardProductRow
           }
           pageInfo {
             hasNextPage
@@ -332,6 +466,7 @@ async function fetchProductPage(
           }
         }
       }
+      ${PRODUCT_ROW_FIELDS}
     `,
     {
       variables: {
@@ -552,8 +687,9 @@ export default function Dashboard() {
 
 // Views the app filters or sorts only check so many products
 function limitNote(checked: number, filters: DashboardFilters) {
-  if (isAppSort(filters.sort)) {
-    return `Sorted the first ${checked} products with an expiry date. Filter by expiry or search to narrow it down.`;
+  // These filters stop at 200 even with the expiry sort, which alone reads 1,000
+  if (isAppSort(filters.sort) && !hasRowFilters(filters)) {
+    return `Sorted the first ${checked.toLocaleString("en-US")} products with an expiry date (in title order). Filter by expiry or search to narrow it down.`;
   }
   return `Status, stock and tracked filters checked the first ${checked} products. Search or filter by type or vendor to narrow it down.`;
 }
