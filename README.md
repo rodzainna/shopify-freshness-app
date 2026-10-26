@@ -81,6 +81,15 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 - **The product page panel saves straight to Shopify, without the app's product lock.** Its batch list write refuses a stale list, but a panel edit at the same moment as a fulfillment can overwrite the other's quantity.
 - **If Shopify can't be reached while the app signs in**, the admin shows Shopify's bare "Handling response" page instead of a message. Signing in can refresh the access token, which calls Shopify. Errors while the dashboard loads its data show a message with Try again.
 
+## Roadmap
+
+Planned, not scheduled:
+
+- **Batch name and arrival date:** label each batch and record when it arrived, shown in the panel, editor and dashboard.
+- **Choose the batch on an order:** let a merchant set which batch an order's items came from, overriding the FEFO pick.
+- **Near-expiry discount:** a setting that discounts a product by a chosen percentage when its soonest unexpired in-stock batch is within a set number of days of expiry. The discount covers the whole product, since Shopify prices aren't per batch.
+- **Minimum shelf life:** a merchant-set number of days. Like expired stock, batches with that many days or fewer left are never decremented, because packing teams shouldn't ship them.
+
 ## Tech stack
 
 |                      |                                                                                                                                      |
