@@ -189,17 +189,18 @@ async function loadExpirySortedPage(
   presetToday: string | null,
   now: Date,
 ): Promise<DashboardPage> {
-  const dated: { id: string; earliestExpirationDate: string | null }[] = [];
+  // The two row fields the sort needs
+  const dated: Pick<DashboardRow, "id" | "earliestExpirationDate">[] = [];
   let uncheckedProducts = false;
   let after: string | null = null;
   for (let request = 0; request < DATE_PAGES; request += 1) {
     const data = await fetchProductDates(graphql, { ...view, after });
-    for (const node of data.products.nodes) {
-      dated.push({
+    dated.push(
+      ...data.products.nodes.map((node) => ({
         id: node.id,
         earliestExpirationDate: earliestDateOf(node),
-      });
-    }
+      })),
+    );
     uncheckedProducts = data.products.pageInfo.hasNextPage;
     after = data.products.pageInfo.endCursor;
     if (!uncheckedProducts) break;
