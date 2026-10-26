@@ -385,7 +385,7 @@ export default function Dashboard() {
       page={page}
       pageCount={totalPages}
       onPage={controls.setPage}
-      onStep={(delta) => controls.stepPage(page, delta)}
+      onStep={(delta) => controls.stepPage(page, totalPages, delta)}
     />
   );
 

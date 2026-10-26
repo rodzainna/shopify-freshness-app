@@ -121,17 +121,39 @@ describe("page", () => {
     expect(hasActiveFilters({ ...none, page: 3 })).toBe(false);
   });
 
+  const step = (
+    shown: number,
+    current: string,
+    pending: string,
+    delta: number,
+  ) =>
+    pageAfterStep(
+      {
+        shown,
+        pageCount: 3,
+        current: new URLSearchParams(current),
+        pending: new URLSearchParams(pending),
+      },
+      delta,
+    );
+
   it("steps from the page shown, not an out-of-range URL page", () => {
     // ?page=99 shows page 3 of 3
-    expect(pageAfterStep(3, null, -1)).toBe(2);
+    expect(step(3, "page=99", "page=99", -1)).toBe(2);
   });
 
   it("steps on from a page change still loading", () => {
-    expect(pageAfterStep(1, new URLSearchParams("page=2"), 1)).toBe(3);
+    expect(step(1, "q=milk", "q=milk&page=2", 1)).toBe(3);
   });
 
-  it("never steps below page 1", () => {
-    expect(pageAfterStep(1, null, -1)).toBe(1);
+  it("stays between page 1 and the last page", () => {
+    expect(step(1, "", "", -1)).toBe(1);
+    // A third quick Next on page 1 of 3
+    expect(step(1, "", "page=3", 1)).toBe(3);
+  });
+
+  it("doesn't step while a different list is loading", () => {
+    expect(step(3, "page=3", "type=Dairy", 1)).toBeNull();
   });
 });
 

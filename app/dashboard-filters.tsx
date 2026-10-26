@@ -121,13 +121,18 @@ export function useDashboardFilters(filters: DashboardFilters) {
     update((params) => applyPage(params, page), { keepPage: true });
   }
 
-  // A change still loading counts, so a second quick click goes one page further
-  function stepPage(shown: number, delta: number) {
-    const pending =
-      latestSearch.current === location.search
-        ? null
-        : new URLSearchParams(latestSearch.current);
-    setPage(pageAfterStep(shown, pending, delta));
+  // A page change still loading counts, so a second quick click goes one page further
+  function stepPage(shown: number, pageCount: number, delta: number) {
+    const page = pageAfterStep(
+      {
+        shown,
+        pageCount,
+        current: new URLSearchParams(location.search),
+        pending: new URLSearchParams(latestSearch.current),
+      },
+      delta,
+    );
+    if (page !== null) setPage(page);
   }
 
   function setSort(next: DashboardSort) {

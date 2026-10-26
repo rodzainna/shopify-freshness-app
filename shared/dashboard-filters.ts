@@ -110,15 +110,34 @@ export function applyPage(params: URLSearchParams, page: number): void {
   else params.set(PAGE_PARAM, String(page));
 }
 
-/** Where Prev/Next goes: on from a change still loading, else from the page shown. */
+export interface PageStepView {
+  // The page on screen, which the loader keeps in range
+  shown: number;
+  pageCount: number;
+  current: URLSearchParams;
+  // The newest URL, which may still be loading
+  pending: URLSearchParams;
+}
+
+/** Where Prev/Next goes, or null while a different list is still loading. */
 export function pageAfterStep(
-  shown: number,
-  pending: URLSearchParams | null,
+  view: PageStepView,
   delta: number,
-): number {
-  // The shown page, not the URL's, since the loader keeps it in range
-  const from = pending ? parsePage(pending) : shown;
-  return Math.max(1, from + delta);
+): number | null {
+  const { shown, pageCount, current, pending } = view;
+  let from = shown;
+  if (!sameParams(pending, current)) {
+    // A filter or sort still loading is a list the user hasn't seen
+    if (!sameParams(withoutPage(pending), withoutPage(current))) return null;
+    from = parsePage(pending);
+  }
+  return Math.min(Math.max(1, from + delta), pageCount);
+}
+
+function withoutPage(params: URLSearchParams): URLSearchParams {
+  const copy = new URLSearchParams(params);
+  copy.delete(PAGE_PARAM);
+  return copy;
 }
 
 /** True when two URLs hold the same params, whatever their order. */
