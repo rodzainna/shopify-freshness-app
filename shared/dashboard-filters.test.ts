@@ -13,6 +13,8 @@ import {
   applySort,
   applyExpiry,
   applyPage,
+  pageAfterStep,
+  sameParams,
   clearFilters,
   presetRange,
   isAppSort,
@@ -117,6 +119,36 @@ describe("page", () => {
 
   it("doesn't count as a filter", () => {
     expect(hasActiveFilters({ ...none, page: 3 })).toBe(false);
+  });
+
+  it("steps from the page shown, not an out-of-range URL page", () => {
+    // ?page=99 shows page 3 of 3
+    expect(pageAfterStep(3, null, -1)).toBe(2);
+  });
+
+  it("steps on from a page change still loading", () => {
+    expect(pageAfterStep(1, new URLSearchParams("page=2"), 1)).toBe(3);
+  });
+
+  it("never steps below page 1", () => {
+    expect(pageAfterStep(1, null, -1)).toBe(1);
+  });
+});
+
+describe("sameParams", () => {
+  const same = (a: string, b: string) =>
+    sameParams(new URLSearchParams(a), new URLSearchParams(b));
+
+  it("ignores the order of different params", () => {
+    expect(same("status=fresh&type=Dairy", "type=Dairy&status=fresh")).toBe(
+      true,
+    );
+  });
+
+  it("sees a changed, added or removed value", () => {
+    expect(same("q=milk", "q=eggs")).toBe(false);
+    expect(same("q=milk", "q=milk&page=2")).toBe(false);
+    expect(same("type=A&type=B", "type=A")).toBe(false);
   });
 });
 

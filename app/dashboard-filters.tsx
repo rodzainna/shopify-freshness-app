@@ -22,8 +22,9 @@ import {
   clearFilters,
   isDashboardSort,
   isExpiryPreset,
-  parsePage,
+  pageAfterStep,
   parseSort,
+  sameParams,
 } from "../shared/dashboard-filters";
 import { isCalendarDate } from "../shared/freshness";
 import type { FilterOptions } from "./routes/app.filter-options";
@@ -74,11 +75,17 @@ export function useDashboardFilters(filters: DashboardFilters) {
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  function update(change: UpdateParams, replace = false) {
-    const params = new URLSearchParams(latestSearch.current);
-    // Any change shows a different list, so it starts again at page 1
-    params.delete(PAGE_PARAM);
+  function update(
+    change: UpdateParams,
+    { replace = false, keepPage = false } = {},
+  ) {
+    const current = new URLSearchParams(latestSearch.current);
+    const params = new URLSearchParams(current);
     change(params);
+    // Same list, so stay on this page
+    if (sameParams(params, current)) return;
+    // A different list starts again at page 1
+    if (!keepPage) params.delete(PAGE_PARAM);
     latestSearch.current = `?${params}`;
     navigate({ search: latestSearch.current }, { replace });
   }
@@ -89,10 +96,13 @@ export function useDashboardFilters(filters: DashboardFilters) {
     timer.current = setTimeout(() => {
       timer.current = undefined;
       // Replace, so each pause in typing doesn't add a Back step
-      update((params) => {
-        if (value.trim()) params.set(FILTER_PARAMS.search, value.trim());
-        else params.delete(FILTER_PARAMS.search);
-      }, true);
+      update(
+        (params) => {
+          if (value.trim()) params.set(FILTER_PARAMS.search, value.trim());
+          else params.delete(FILTER_PARAMS.search);
+        },
+        { replace: true },
+      );
     }, SEARCH_DELAY_MS);
   }
 
@@ -108,17 +118,20 @@ export function useDashboardFilters(filters: DashboardFilters) {
   }
 
   function setPage(page: number) {
-    update((params) => applyPage(params, page));
+    update((params) => applyPage(params, page), { keepPage: true });
   }
 
-  // From the newest URL, so a second quick click goes one page further
-  function stepPage(delta: number) {
-    const current = parsePage(new URLSearchParams(latestSearch.current));
-    setPage(Math.max(1, current + delta));
+  // A change still loading counts, so a second quick click goes one page further
+  function stepPage(shown: number, delta: number) {
+    const pending =
+      latestSearch.current === location.search
+        ? null
+        : new URLSearchParams(latestSearch.current);
+    setPage(pageAfterStep(shown, pending, delta));
   }
 
   function setSort(next: DashboardSort) {
-    if (next !== sort) update((params) => applySort(params, next));
+    update((params) => applySort(params, next));
   }
 
   function clearAll() {

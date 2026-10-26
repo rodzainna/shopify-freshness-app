@@ -59,22 +59,21 @@ const ROW_FILTER_PAGES = 4;
 // Cursor-only queries reach a later page this many products at a time
 const CURSOR_PAGE = 250;
 
-interface DashboardData {
-  shop: { ianaTimezone: string };
+interface ProductList {
   // Only when asked for with $withCount
   productsCount?: { count: number };
   products: {
-    nodes: DashboardProductNode[];
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
   };
 }
 
-interface CursorData {
-  productsCount?: { count: number };
-  products: {
-    edges: { cursor: string }[];
-    pageInfo: { hasNextPage: boolean; endCursor: string | null };
-  };
+interface DashboardData extends ProductList {
+  shop: { ianaTimezone: string };
+  products: ProductList["products"] & { nodes: DashboardProductNode[] };
+}
+
+interface CursorData extends ProductList {
+  products: ProductList["products"] & { edges: { cursor: string }[] };
 }
 
 type ProductView = { query: string | null } & ProductSort;
@@ -521,7 +520,7 @@ export default function Dashboard() {
           page={page}
           pageCount={totalPages}
           onPage={controls.setPage}
-          onStep={controls.stepPage}
+          onStep={(delta) => controls.stepPage(page, delta)}
         />
       </s-section>
       {isAppSort(filters.sort) && rows.length > 0 && (

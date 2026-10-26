@@ -110,6 +110,27 @@ export function applyPage(params: URLSearchParams, page: number): void {
   else params.set(PAGE_PARAM, String(page));
 }
 
+/** Where Prev/Next goes: on from a change still loading, else from the page shown. */
+export function pageAfterStep(
+  shown: number,
+  pending: URLSearchParams | null,
+  delta: number,
+): number {
+  // The shown page, not the URL's, since the loader keeps it in range
+  const from = pending ? parsePage(pending) : shown;
+  return Math.max(1, from + delta);
+}
+
+/** True when two URLs hold the same params, whatever their order. */
+export function sameParams(a: URLSearchParams, b: URLSearchParams): boolean {
+  const sorted = (params: URLSearchParams) => {
+    const copy = new URLSearchParams(params);
+    copy.sort();
+    return copy.toString();
+  };
+  return sorted(a) === sorted(b);
+}
+
 /** The URL's sort, or the default when it's missing or unknown. */
 export function parseSort(params: URLSearchParams): DashboardSort {
   return (
