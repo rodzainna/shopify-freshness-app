@@ -176,7 +176,7 @@ export function DashboardFilterBar({
   const options = useFetcher<FilterOptions>();
   // Fetched once, the first time a filter opens, so searches don't refetch them
   function loadOptions() {
-    if (options.state === "idle" && !options.data) {
+    if (options.state === "idle" && (!options.data || options.data.failed)) {
       options.load("/app/filter-options");
     }
   }
@@ -227,6 +227,7 @@ export function DashboardFilterBar({
             id="type-filter"
             label="Type"
             options={options.data?.types.map(sameLabel)}
+            failed={options.data?.failed}
             selected={filters.types}
             onOpen={loadOptions}
             onApply={(values) => controls.setFilter(FILTER_PARAMS.type, values)}
@@ -235,6 +236,7 @@ export function DashboardFilterBar({
             id="vendor-filter"
             label="Vendor"
             options={options.data?.vendors.map(sameLabel)}
+            failed={options.data?.failed}
             selected={filters.vendors}
             onOpen={loadOptions}
             onApply={(values) =>
@@ -306,6 +308,7 @@ function FilterButton({
   id,
   label,
   options,
+  failed = false,
   selected,
   onOpen,
   onApply,
@@ -314,6 +317,7 @@ function FilterButton({
   label: string;
   // undefined until loaded
   options: Option[] | undefined;
+  failed?: boolean;
   selected: string[];
   onOpen?: () => void;
   onApply: (values: string[]) => void;
@@ -351,7 +355,14 @@ function FilterButton({
         onDraft={setDraft}
         onApply={() => onApply(draft)}
         onClear={() => onApply([])}
-      />
+      >
+        {failed && (
+          <s-text tone="critical">
+            Couldn&apos;t load the choices. Close and open the filter to try
+            again.
+          </s-text>
+        )}
+      </ChoicePopover>
     </>
   );
 }

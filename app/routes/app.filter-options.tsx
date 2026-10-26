@@ -8,6 +8,8 @@ const OPTION_LIMIT = 250;
 export interface FilterOptions {
   types: string[];
   vendors: string[];
+  // Shopify couldn't be reached; the filter offers a retry instead
+  failed: boolean;
 }
 
 // The dashboard's Type and Vendor choices, loaded once when a filter first opens
@@ -15,8 +17,22 @@ export const loader = async ({
   request,
 }: LoaderFunctionArgs): Promise<FilterOptions> => {
   const { admin } = await authenticate.admin(request);
-  const response = await admin.graphql(
-    `#graphql
+  try {
+    return await readFilterOptions(admin.graphql);
+  } catch (error) {
+    if (error instanceof Response) throw error;
+    // A thrown error would replace the whole dashboard with its error page
+    console.error("Filter options request failed", error);
+    return { types: [], vendors: [], failed: true };
+  }
+};
+
+async function readFilterOptions(
+  graphql: Awaited<ReturnType<typeof authenticate.admin>>["admin"]["graphql"],
+): Promise<FilterOptions> {
+  const response = await graphql(
+    `
+      #graphql
       query FilterOptions($optionLimit: Int!) {
         productTypes(first: $optionLimit) {
           nodes
@@ -24,7 +40,8 @@ export const loader = async ({
         productVendors(first: $optionLimit) {
           nodes
         }
-      }`,
+      }
+    `,
     { variables: { optionLimit: OPTION_LIMIT } },
   );
   const { data } = (await response.json()) as {
@@ -33,5 +50,9 @@ export const loader = async ({
       productVendors: { nodes: string[] };
     };
   };
-  return { types: data.productTypes.nodes, vendors: data.productVendors.nodes };
-};
+  return {
+    types: data.productTypes.nodes,
+    vendors: data.productVendors.nodes,
+    failed: false,
+  };
+}
