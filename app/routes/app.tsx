@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
+import { shopifyResponse } from "../shopify-response";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -27,7 +28,11 @@ export default function App() {
 
 // Shopify needs React Router to catch some thrown responses, so that their headers are included in the response.
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  const error = useRouteError();
+  const response = shopifyResponse(error);
+  if (response) return response;
+  // Like boundary.error, a thrown error goes on to React Router's default boundary
+  throw error;
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

@@ -37,7 +37,10 @@ const get = (query: string) =>
   } as Parameters<typeof loader>[0]);
 
 beforeEach(() => db.productLock.deleteMany({ where: { shop } }));
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.mocked(authenticate.admin).mockReset();
+});
 
 describe("app/batches", () => {
   it("saves an edit", async () => {
@@ -129,6 +132,30 @@ describe("app/batches", () => {
     expect(await response.json()).toStrictEqual({
       message: "Couldn't reach Shopify. Try again.",
     });
+  });
+
+  it("turns Shopify's HTTP errors, which arrive as responses, into a message", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(authenticate.admin).mockRejectedValue(
+      new Response("{}", { status: 503 }),
+    );
+
+    const response = (await post({
+      productId,
+      opened,
+      edited: opened,
+    })) as Response;
+
+    expect(response.status).toBe(502);
+  });
+
+  it("passes on Shopify's sign-in responses", async () => {
+    const bounce = new Response(null, { status: 302 });
+    vi.mocked(authenticate.admin).mockRejectedValue(bounce);
+
+    await expect(
+      get(`productId=${encodeURIComponent(productId)}`),
+    ).rejects.toBe(bounce);
   });
 
   it("reads a product's batches", async () => {
