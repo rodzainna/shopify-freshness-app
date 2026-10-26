@@ -68,6 +68,13 @@ export interface DashboardRow {
   unbatchedStock: number | null;
 }
 
+/** A product's earliest in-stock expiry, as the dashboard sorts and shows it. */
+export function earliestDateOf(
+  product: Pick<DashboardProductNode, "earliestExpiration">,
+): string | null {
+  return product.earliestExpiration?.value ?? null;
+}
+
 export function toDashboardRows(
   products: DashboardProductNode[],
   today: string,
@@ -80,7 +87,7 @@ export function toDashboardRows(
       title: product.title,
       adminUrl: `${ADMIN_PRODUCTS}/${product.legacyResourceId}`,
       imageUrl: product.featuredMedia?.preview?.image?.url ?? null,
-      earliestExpirationDate: product.earliestExpiration?.value ?? null,
+      earliestExpirationDate: earliestDateOf(product),
       stock: product.tracksInventory ? product.totalInventory : null,
       tracked: nodes.length > 0,
     };

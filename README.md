@@ -26,7 +26,7 @@ It's a portfolio project, built to show custom Shopify app work end to end. It r
 
 - Each product's overall status, earliest expiry and a per-batch breakdown, with a thumbnail and a link to its admin page. Sold-out batches are marked as such. It shows 50 products per page in the chosen sort order, and up to 10 batches each. A page picker ("Page 3 of 9") jumps to any page; it counts with Shopify's `productsCount` and reaches later pages with cursor-only queries, so only the page shown loads its batches.
 - Stock next to the units in batches, with a **Stock check** column that flags batches over stock ("5 over") or stock no batch covers ("8 unbatched").
-- Search, sorting by product, stock, type, vendor or earliest expiry (soonest first, listing products that have an expiry date; the app sorts up to 200 of them, since Shopify can't sort by a metafield), and filters for type, vendor, status, stock check, tracked products and expiry. The expiry filter offers "Already expired", "Today", "Next 7 days", "Next 30 days" (counted from the shop's own date) or a custom range, matched against each product's earliest in-stock expiry by Shopify's search. Sort and filters live in the URL, and clearing the filters keeps the sort. The status, stock check and tracked filters look through up to 200 products.
+- Search, sorting by product, stock, type, vendor or earliest expiry (soonest first, listing products that have an expiry date; Shopify can't sort by a metafield, so the app reads up to 1,000 dates cheaply, sorts them, and then loads only the page shown with its batches), and filters for type, vendor, status, stock check, tracked products and expiry. The expiry filter offers "Already expired", "Today", "Next 7 days", "Next 30 days" (counted from the shop's own date) or a custom range, matched against each product's earliest in-stock expiry by Shopify's search. Sort and filters live in the URL, and clearing the filters keeps the sort.
 - An editor per product: change batch quantities and dates, or add new batches (up to 25 per save), including to a product that has none. A running total of stock and batch units updates as you type. Saves take the product's lock and refuse if the batches changed since the editor opened. Removing a batch stays in the product panel.
 - An empty state when the store has no products.
 
@@ -70,6 +70,16 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 - **`fulfillments/create`, not `orders/paid`.** Stock leaves on shipment, and partial fulfillments arrive as separate events. On a real partial fulfillment, the payload's `quantity` was the units shipped in that fulfillment.
 - **Minimal data access.** The scopes are `write_products`, `read_metaobjects` and `read_fulfillments`. The app requests no protected customer fields, which Shopify's docs say are then redacted from payloads, and it stores no customer data.
 - **Pure logic in `shared/`.** Freshness, FEFO, validation and grouping are pure functions with unit tests. Routes and the extension call them instead of re-implementing the rules.
+
+## Known limitations
+
+- **The expiry sort covers up to 1,000 products.** It sorts the first 1,000 products with an expiry date, taken in title order, and says so when there are more. The expiry filter narrows a bigger list.
+- **Products without an expiry date aren't listed in the expiry sort.** Shopify's search can find products that have a date but not ones missing it.
+- **The status, stock check and tracked filters check up to 200 products.** Shopify's search can't see batches, so the app checks the first 200 in the chosen order and says so when there are more. Page counts in these views cover only the products checked.
+- **Far pages take longer on large stores.** Shopify has no offset paging, so reaching a later page reads the cursors before it, 250 at a time. The page picker lists every page.
+- **Products with more than 250 batches** show partial unit totals, marked with a "+", since the dashboard reads 250 batches per product.
+- **The product page panel saves straight to Shopify, without the app's product lock.** Its batch list write refuses a stale list, but a panel edit at the same moment as a fulfillment can overwrite the other's quantity.
+- **When Shopify can't be reached, the dashboard shows a blank error page** instead of a message. The editor already shows one.
 
 ## Tech stack
 

@@ -18,7 +18,7 @@ import {
   clearFilters,
   presetRange,
   isAppSort,
-  sortRowsByExpiry,
+  sortByExpiry,
 } from "./dashboard-filters";
 
 const none: DashboardFilters = {
@@ -227,7 +227,7 @@ describe("earliest expiry sort", () => {
       row({ id: "oct-too", earliestExpirationDate: "2026-10-19" }),
     ];
 
-    expect(sortRowsByExpiry(rows).map(({ id }) => id)).toStrictEqual([
+    expect(sortByExpiry(rows).map(({ id }) => id)).toStrictEqual([
       "oct",
       "oct-too",
       "nov",
