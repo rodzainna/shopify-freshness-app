@@ -174,12 +174,15 @@ export function DashboardFilterBar({
   pager?: ReactNode;
 }) {
   const options = useFetcher<FilterOptions>();
-  // Fetched once, the first time a filter opens, so searches don't refetch them
+  // Fetched when a filter first opens and after a failure; searches don't refetch
   function loadOptions() {
-    if (options.state === "idle" && !options.data) {
+    if (options.state === "idle" && (!options.data || options.data.failed)) {
       options.load("/app/filter-options");
     }
   }
+  // A retry shows the spinner, not the last failed result
+  const optionsShown =
+    options.state !== "idle" && options.data?.failed ? undefined : options.data;
 
   const searchField = useLiveProperty("s-search-field", "value", controls.text);
   const trackedBox = useLiveProperty("s-checkbox", "checked", filters.tracked);
@@ -226,7 +229,8 @@ export function DashboardFilterBar({
           <FilterButton
             id="type-filter"
             label="Type"
-            options={options.data?.types.map(sameLabel)}
+            options={optionsShown?.types.map(sameLabel)}
+            failed={optionsShown?.failed}
             selected={filters.types}
             onOpen={loadOptions}
             onApply={(values) => controls.setFilter(FILTER_PARAMS.type, values)}
@@ -234,7 +238,8 @@ export function DashboardFilterBar({
           <FilterButton
             id="vendor-filter"
             label="Vendor"
-            options={options.data?.vendors.map(sameLabel)}
+            options={optionsShown?.vendors.map(sameLabel)}
+            failed={optionsShown?.failed}
             selected={filters.vendors}
             onOpen={loadOptions}
             onApply={(values) =>
@@ -306,6 +311,7 @@ function FilterButton({
   id,
   label,
   options,
+  failed = false,
   selected,
   onOpen,
   onApply,
@@ -314,6 +320,7 @@ function FilterButton({
   label: string;
   // undefined until loaded
   options: Option[] | undefined;
+  failed?: boolean;
   selected: string[];
   onOpen?: () => void;
   onApply: (values: string[]) => void;
@@ -351,7 +358,16 @@ function FilterButton({
         onDraft={setDraft}
         onApply={() => onApply(draft)}
         onClear={() => onApply([])}
-      />
+      >
+        {failed && (
+          <s-stack direction="inline" gap="small-200" alignItems="center">
+            <s-text tone="critical">Couldn&apos;t load the choices.</s-text>
+            <s-button variant="tertiary" onClick={onOpen}>
+              Try again
+            </s-button>
+          </s-stack>
+        )}
+      </ChoicePopover>
     </>
   );
 }

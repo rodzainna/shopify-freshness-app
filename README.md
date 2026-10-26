@@ -79,7 +79,7 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 - **Far pages take longer on large stores.** Shopify has no offset paging, so reaching a later page reads the cursors before it, 250 at a time. The page picker lists every page.
 - **Products with more than 250 batches** show partial unit totals, marked with a "+", since the dashboard reads 250 batches per product.
 - **The product page panel saves straight to Shopify, without the app's product lock.** Its batch list write refuses a stale list, but a panel edit at the same moment as a fulfillment can overwrite the other's quantity.
-- **When Shopify can't be reached, the dashboard shows a blank error page** instead of a message. The editor already shows one.
+- **If Shopify can't be reached while the app signs in**, the admin shows Shopify's bare "Handling response" page instead of a message. Signing in can refresh the access token, which calls Shopify. Errors while the dashboard loads its data show a message with Try again.
 
 ## Tech stack
 

@@ -4,11 +4,22 @@ import type {
   ShouldRevalidateFunction,
 } from "react-router";
 import { useState } from "react";
-import { useLoaderData, useLocation, useNavigation } from "react-router";
-import { boundary } from "@shopify/shopify-app-react-router/server";
+import {
+  isRouteErrorResponse,
+  useLoaderData,
+  useLocation,
+  useNavigation,
+  useRevalidator,
+  useRouteError,
+} from "react-router";
+import {
+  type AdminGraphqlClient,
+  boundary,
+} from "@shopify/shopify-app-react-router/server";
 
 import { BATCH_EDITOR_ID, BatchEditor, type EditTarget } from "../batch-editor";
 import { StockBadges } from "../stock-badges";
+import { isShopifySignIn, shopifyResponse } from "../shopify-response";
 import { Pager } from "../pager";
 import { DashboardFilterBar, useDashboardFilters } from "../dashboard-filters";
 import { authenticate } from "../shopify.server";
@@ -37,6 +48,7 @@ import {
   type DashboardFilters,
   type ExpiryRange,
   type ProductSort,
+  DEFAULT_SORT,
   parseDashboardFilters,
   toProductQuery,
   toProductSort,
@@ -103,10 +115,6 @@ interface DashboardPage {
   today: string;
 }
 
-type AdminGraphql = Awaited<
-  ReturnType<typeof authenticate.admin>
->["admin"]["graphql"];
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const filters = parseDashboardFilters(new URL(request.url).searchParams);
@@ -137,7 +145,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 // Shopify pages the list: find where the page starts, then load just that page
 async function loadShopifyPage(
-  graphql: AdminGraphql,
+  graphql: AdminGraphqlClient,
   view: ProductView,
   requestedPage: number,
   presetToday: string | null,
@@ -183,7 +191,7 @@ async function loadShopifyPage(
 
 // The expiry sort: read dates cheaply, sort them, then load only this page's rows
 async function loadExpirySortedPage(
-  graphql: AdminGraphql,
+  graphql: AdminGraphqlClient,
   view: ProductView,
   requestedPage: number,
   presetToday: string | null,
@@ -224,7 +232,7 @@ async function loadExpirySortedPage(
 
 // Status, stock or tracked filters the app applies: check up to 200, then slice a page
 async function loadCheckedPage(
-  graphql: AdminGraphql,
+  graphql: AdminGraphqlClient,
   view: ProductView,
   filters: DashboardFilters,
   presetToday: string | null,
@@ -322,7 +330,7 @@ const PRODUCT_ROW_FIELDS = `#graphql
 `;
 
 async function fetchCursors(
-  graphql: AdminGraphql,
+  graphql: AdminGraphqlClient,
   variables: ProductView & {
     after: string | null;
     first: number;
@@ -367,7 +375,7 @@ async function fetchCursors(
 }
 
 async function fetchProductDates(
-  graphql: AdminGraphql,
+  graphql: AdminGraphqlClient,
   variables: ProductView & { after: string | null },
 ): Promise<DatesData> {
   const response = await graphql(
@@ -407,7 +415,7 @@ async function fetchProductDates(
 }
 
 async function fetchProductsById(
-  graphql: AdminGraphql,
+  graphql: AdminGraphqlClient,
   ids: string[],
 ): Promise<RowsByIdData> {
   const response = await graphql(
@@ -430,7 +438,7 @@ async function fetchProductsById(
 }
 
 async function fetchProductPage(
-  graphql: AdminGraphql,
+  graphql: AdminGraphqlClient,
   variables: ProductView & { after: string | null; withCount: boolean },
 ): Promise<DashboardData> {
   const response = await graphql(
@@ -732,6 +740,42 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   }
   return defaultShouldRevalidate;
 };
+
+// A failed load stays inside the app with a retry, instead of a blank page
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const revalidator = useRevalidator();
+  const view = parseDashboardFilters(new URLSearchParams(useLocation().search));
+  const filteredView =
+    hasActiveFilters(view) || view.sort !== DEFAULT_SORT || view.page > 1;
+  // Shopify's sign-in responses render as Shopify's do; its HTTP errors get the banner
+  if (isRouteErrorResponse(error) && isShopifySignIn(error.status)) {
+    return shopifyResponse(error);
+  }
+
+  return (
+    <s-page heading="Freshness overview" inlineSize="large">
+      <s-banner tone="critical" heading="Couldn't load the dashboard">
+        <s-paragraph>
+          Shopify may be unreachable, or this view couldn&apos;t load.
+        </s-paragraph>
+        <s-button
+          slot="secondary-actions"
+          loading={revalidator.state === "loading" || undefined}
+          onClick={() => revalidator.revalidate()}
+        >
+          Try again
+        </s-button>
+        {/* A way out when one filter, sort or page keeps failing */}
+        {filteredView && (
+          <s-button slot="secondary-actions" href="/app">
+            Show all products
+          </s-button>
+        )}
+      </s-banner>
+    </s-page>
+  );
+}
 
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
