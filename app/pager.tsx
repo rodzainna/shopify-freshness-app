@@ -1,4 +1,4 @@
-/** "‹ Page [3] of 9 ›" under the table; hidden when everything fits on one page. */
+/** "‹ Page [3] of 9 ›", right-aligned; hidden when everything fits on one page. */
 export function Pager({
   page,
   pageCount,
@@ -18,18 +18,19 @@ export function Pager({
       direction="inline"
       gap="small-200"
       alignItems="center"
-      justifyContent="center"
+      justifyContent="end"
     >
       {page > 1 && (
         <s-button
+          variant="tertiary"
           icon="chevron-left"
           accessibilityLabel="Previous page"
           onClick={() => onStep(-1)}
         />
       )}
-      <s-text>Page</s-text>
+      <s-text color="subdued">Page</s-text>
       {/* Keyed by page, since the value attribute only sets a starting value */}
-      <s-box inlineSize="80px">
+      <s-box inlineSize="64px">
         <s-select
           key={page}
           label="Page"
@@ -44,9 +45,10 @@ export function Pager({
           ))}
         </s-select>
       </s-box>
-      <s-text>of {pageCount}</s-text>
+      <s-text color="subdued">of {pageCount}</s-text>
       {page < pageCount && (
         <s-button
+          variant="tertiary"
           icon="chevron-right"
           accessibilityLabel="Next page"
           onClick={() => onStep(1)}

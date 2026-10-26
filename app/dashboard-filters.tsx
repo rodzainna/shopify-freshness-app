@@ -161,9 +161,12 @@ export type DashboardFilterControls = ReturnType<typeof useDashboardFilters>;
 export function DashboardFilterBar({
   filters,
   controls,
+  pager,
 }: {
   filters: DashboardFilters;
   controls: DashboardFilterControls;
+  // Shown beside the search
+  pager?: ReactNode;
 }) {
   const options = useFetcher<FilterOptions>();
   // Fetched once, the first time a filter opens, so searches don't refetch them
@@ -178,13 +181,17 @@ export function DashboardFilterBar({
 
   return (
     <s-stack slot="filters" gap="small-200">
-      <s-search-field
-        ref={searchField}
-        label="Search products"
-        labelAccessibilityVisibility="exclusive"
-        placeholder="Search products"
-        onInput={(event) => controls.search(event.currentTarget.value)}
-      />
+      {/* The search takes the room the page picker leaves */}
+      <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+        <s-search-field
+          ref={searchField}
+          label="Search products"
+          labelAccessibilityVisibility="exclusive"
+          placeholder="Search products"
+          onInput={(event) => controls.search(event.currentTarget.value)}
+        />
+        {pager}
+      </s-grid>
       {/* Filters on the left; the tracked toggle and sort on the right */}
       <s-stack
         direction="inline"

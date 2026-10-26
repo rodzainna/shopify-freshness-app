@@ -379,11 +379,25 @@ export default function Dashboard() {
     );
   }
 
+  // Above and below the table, so either end of a long page can change it
+  const pager = (
+    <Pager
+      page={page}
+      pageCount={totalPages}
+      onPage={controls.setPage}
+      onStep={(delta) => controls.stepPage(page, delta)}
+    />
+  );
+
   return (
     <s-page heading="Freshness overview" inlineSize="large">
       <s-section padding="none">
         <s-table loading={loading || undefined}>
-          <DashboardFilterBar filters={filters} controls={controls} />
+          <DashboardFilterBar
+            filters={filters}
+            controls={controls}
+            pager={pager}
+          />
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
             <s-table-header listSlot="secondary">Status</s-table-header>
@@ -500,6 +514,8 @@ export default function Dashboard() {
             ))}
           </s-table-body>
         </s-table>
+        {/* The table draws no line under its last row */}
+        {rows.length > 0 && <s-divider />}
         {rows.length === 0 && (
           <s-box padding="base">
             {filtered ? (
@@ -516,12 +532,7 @@ export default function Dashboard() {
             )}
           </s-box>
         )}
-        <Pager
-          page={page}
-          pageCount={totalPages}
-          onPage={controls.setPage}
-          onStep={(delta) => controls.stepPage(page, delta)}
-        />
+        {totalPages > 1 && <s-box padding="small-200 base">{pager}</s-box>}
       </s-section>
       {isAppSort(filters.sort) && rows.length > 0 && (
         <s-paragraph color="subdued">
