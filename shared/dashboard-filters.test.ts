@@ -12,6 +12,9 @@ import {
   DEFAULT_SORT,
   applySort,
   applyExpiry,
+  applyPage,
+  pageAfterStep,
+  sameParams,
   clearFilters,
   presetRange,
   isAppSort,
@@ -27,6 +30,7 @@ const none: DashboardFilters = {
   tracked: false,
   expiry: null,
   sort: DEFAULT_SORT,
+  page: 1,
 };
 
 const row = (overrides: Partial<DashboardRow>): DashboardRow => ({
@@ -89,6 +93,84 @@ describe("parseDashboardFilters", () => {
         parseDashboardFilters(new URLSearchParams("sort=vendor")),
       ),
     ).toBe(false);
+  });
+});
+
+describe("page", () => {
+  const pageOf = (search: string) =>
+    parseDashboardFilters(new URLSearchParams(search)).page;
+
+  it("reads a whole page number from 1, else page 1", () => {
+    expect(pageOf("page=3")).toBe(3);
+    expect(pageOf("")).toBe(1);
+    expect(pageOf("page=0")).toBe(1);
+    expect(pageOf("page=2.5")).toBe(1);
+    expect(pageOf("page=two")).toBe(1);
+  });
+
+  it("leaves page 1 out of the URL", () => {
+    const params = new URLSearchParams("q=milk");
+
+    applyPage(params, 4);
+    expect(params.toString()).toBe("q=milk&page=4");
+    applyPage(params, 1);
+    expect(params.toString()).toBe("q=milk");
+  });
+
+  it("doesn't count as a filter", () => {
+    expect(hasActiveFilters({ ...none, page: 3 })).toBe(false);
+  });
+
+  const step = (
+    shown: number,
+    current: string,
+    pending: string,
+    delta: number,
+  ) =>
+    pageAfterStep(
+      {
+        shown,
+        pageCount: 3,
+        current: new URLSearchParams(current),
+        pending: new URLSearchParams(pending),
+      },
+      delta,
+    );
+
+  it("steps from the page shown, not an out-of-range URL page", () => {
+    // ?page=99 shows page 3 of 3
+    expect(step(3, "page=99", "page=99", -1)).toBe(2);
+  });
+
+  it("steps on from a page change still loading", () => {
+    expect(step(1, "q=milk", "q=milk&page=2", 1)).toBe(3);
+  });
+
+  it("stays between page 1 and the last page", () => {
+    expect(step(1, "", "", -1)).toBe(1);
+    // A third quick Next on page 1 of 3
+    expect(step(1, "", "page=3", 1)).toBe(3);
+  });
+
+  it("doesn't step while a different list is loading", () => {
+    expect(step(3, "page=3", "type=Dairy", 1)).toBeNull();
+  });
+});
+
+describe("sameParams", () => {
+  const same = (a: string, b: string) =>
+    sameParams(new URLSearchParams(a), new URLSearchParams(b));
+
+  it("ignores the order of different params", () => {
+    expect(same("status=fresh&type=Dairy", "type=Dairy&status=fresh")).toBe(
+      true,
+    );
+  });
+
+  it("sees a changed, added or removed value", () => {
+    expect(same("q=milk", "q=eggs")).toBe(false);
+    expect(same("q=milk", "q=milk&page=2")).toBe(false);
+    expect(same("type=A&type=B", "type=A")).toBe(false);
   });
 });
 

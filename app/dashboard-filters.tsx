@@ -12,15 +12,19 @@ import {
   EXPIRY_PRESETS,
   type ExpiryFilter,
   FILTER_PARAMS,
+  PAGE_PARAM,
   SORTS,
   STATUS_FILTERS,
   STOCK_FILTERS,
   applyExpiry,
+  applyPage,
   applySort,
   clearFilters,
   isDashboardSort,
   isExpiryPreset,
+  pageAfterStep,
   parseSort,
+  sameParams,
 } from "../shared/dashboard-filters";
 import { isCalendarDate } from "../shared/freshness";
 import type { FilterOptions } from "./routes/app.filter-options";
@@ -71,9 +75,17 @@ export function useDashboardFilters(filters: DashboardFilters) {
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  function update(change: UpdateParams, replace = false) {
-    const params = new URLSearchParams(latestSearch.current);
+  function update(
+    change: UpdateParams,
+    { replace = false, keepPage = false } = {},
+  ) {
+    const current = new URLSearchParams(latestSearch.current);
+    const params = new URLSearchParams(current);
     change(params);
+    // Same list, so stay on this page
+    if (sameParams(params, current)) return;
+    // A different list starts again at page 1
+    if (!keepPage) params.delete(PAGE_PARAM);
     latestSearch.current = `?${params}`;
     navigate({ search: latestSearch.current }, { replace });
   }
@@ -84,10 +96,13 @@ export function useDashboardFilters(filters: DashboardFilters) {
     timer.current = setTimeout(() => {
       timer.current = undefined;
       // Replace, so each pause in typing doesn't add a Back step
-      update((params) => {
-        if (value.trim()) params.set(FILTER_PARAMS.search, value.trim());
-        else params.delete(FILTER_PARAMS.search);
-      }, true);
+      update(
+        (params) => {
+          if (value.trim()) params.set(FILTER_PARAMS.search, value.trim());
+          else params.delete(FILTER_PARAMS.search);
+        },
+        { replace: true },
+      );
     }, SEARCH_DELAY_MS);
   }
 
@@ -102,8 +117,26 @@ export function useDashboardFilters(filters: DashboardFilters) {
     update((params) => applyExpiry(params, expiry));
   }
 
+  function setPage(page: number) {
+    update((params) => applyPage(params, page), { keepPage: true });
+  }
+
+  // A page change still loading counts, so a second quick click goes one page further
+  function stepPage(shown: number, pageCount: number, delta: number) {
+    const page = pageAfterStep(
+      {
+        shown,
+        pageCount,
+        current: new URLSearchParams(location.search),
+        pending: new URLSearchParams(latestSearch.current),
+      },
+      delta,
+    );
+    if (page !== null) setPage(page);
+  }
+
   function setSort(next: DashboardSort) {
-    if (next !== sort) update((params) => applySort(params, next));
+    update((params) => applySort(params, next));
   }
 
   function clearAll() {
@@ -114,7 +147,17 @@ export function useDashboardFilters(filters: DashboardFilters) {
     update(clearFilters);
   }
 
-  return { text, sort, search, setFilter, setExpiry, setSort, clearAll };
+  return {
+    text,
+    sort,
+    search,
+    setFilter,
+    setExpiry,
+    setSort,
+    setPage,
+    stepPage,
+    clearAll,
+  };
 }
 
 export type DashboardFilterControls = ReturnType<typeof useDashboardFilters>;
@@ -123,9 +166,12 @@ export type DashboardFilterControls = ReturnType<typeof useDashboardFilters>;
 export function DashboardFilterBar({
   filters,
   controls,
+  pager,
 }: {
   filters: DashboardFilters;
   controls: DashboardFilterControls;
+  // Shown beside the search
+  pager?: ReactNode;
 }) {
   const options = useFetcher<FilterOptions>();
   // Fetched once, the first time a filter opens, so searches don't refetch them
@@ -140,13 +186,17 @@ export function DashboardFilterBar({
 
   return (
     <s-stack slot="filters" gap="small-200">
-      <s-search-field
-        ref={searchField}
-        label="Search products"
-        labelAccessibilityVisibility="exclusive"
-        placeholder="Search products"
-        onInput={(event) => controls.search(event.currentTarget.value)}
-      />
+      {/* The search takes the room the page picker leaves */}
+      <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+        <s-search-field
+          ref={searchField}
+          label="Search products"
+          labelAccessibilityVisibility="exclusive"
+          placeholder="Search products"
+          onInput={(event) => controls.search(event.currentTarget.value)}
+        />
+        {pager}
+      </s-grid>
       {/* Filters on the left; the tracked toggle and sort on the right */}
       <s-stack
         direction="inline"

@@ -98,6 +98,58 @@ export function presetRange(preset: ExpiryPreset, today: string): ExpiryRange {
   }
 }
 
+/** The URL's page: a whole number from 1, anything else is page 1. */
+export function parsePage(params: URLSearchParams): number {
+  const page = Number(params.get(PAGE_PARAM)?.trim());
+  return Number.isInteger(page) && page >= 1 ? page : 1;
+}
+
+/** Sets the page in a dashboard URL; page 1 is left out. */
+export function applyPage(params: URLSearchParams, page: number): void {
+  if (page <= 1) params.delete(PAGE_PARAM);
+  else params.set(PAGE_PARAM, String(page));
+}
+
+export interface PageStepView {
+  // The page on screen, which the loader keeps in range
+  shown: number;
+  pageCount: number;
+  current: URLSearchParams;
+  // The newest URL, which may still be loading
+  pending: URLSearchParams;
+}
+
+/** Where Prev/Next goes, or null while a different list is still loading. */
+export function pageAfterStep(
+  view: PageStepView,
+  delta: number,
+): number | null {
+  const { shown, pageCount, current, pending } = view;
+  let from = shown;
+  if (!sameParams(pending, current)) {
+    // A filter or sort still loading is a list the user hasn't seen
+    if (!sameParams(withoutPage(pending), withoutPage(current))) return null;
+    from = parsePage(pending);
+  }
+  return Math.min(Math.max(1, from + delta), pageCount);
+}
+
+function withoutPage(params: URLSearchParams): URLSearchParams {
+  const copy = new URLSearchParams(params);
+  copy.delete(PAGE_PARAM);
+  return copy;
+}
+
+/** True when two URLs hold the same params, whatever their order. */
+export function sameParams(a: URLSearchParams, b: URLSearchParams): boolean {
+  const sorted = (params: URLSearchParams) => {
+    const copy = new URLSearchParams(params);
+    copy.sort();
+    return copy.toString();
+  };
+  return sorted(a) === sorted(b);
+}
+
 /** The URL's sort, or the default when it's missing or unknown. */
 export function parseSort(params: URLSearchParams): DashboardSort {
   return (
@@ -135,6 +187,8 @@ export interface DashboardFilters {
   expiry: ExpiryFilter | null;
   // Not a filter: Clear filters keeps it
   sort: DashboardSort;
+  // 1-based; any change to the search, filters or sort goes back to 1
+  page: number;
 }
 
 export const FILTER_PARAMS = {
@@ -150,6 +204,7 @@ export const FILTER_PARAMS = {
 };
 
 export const SORT_PARAM = "sort";
+export const PAGE_PARAM = "page";
 
 export function parseDashboardFilters(
   params: URLSearchParams,
@@ -174,6 +229,7 @@ export function parseDashboardFilters(
     tracked: params.get(FILTER_PARAMS.tracked) === "1",
     expiry: parseExpiry(params),
     sort: parseSort(params),
+    page: parsePage(params),
   };
 }
 
