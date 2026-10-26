@@ -4,7 +4,14 @@ import type {
   ShouldRevalidateFunction,
 } from "react-router";
 import { useState } from "react";
-import { useLoaderData, useLocation, useNavigation } from "react-router";
+import {
+  isRouteErrorResponse,
+  useLoaderData,
+  useLocation,
+  useNavigation,
+  useRevalidator,
+  useRouteError,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { BATCH_EDITOR_ID, BatchEditor, type EditTarget } from "../batch-editor";
@@ -732,6 +739,35 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   }
   return defaultShouldRevalidate;
 };
+
+// A failed load stays inside the app with a retry, instead of a blank page
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const revalidator = useRevalidator();
+  // Shopify's thrown responses, such as a 401 for an expired session, go to its boundary
+  if (isRouteErrorResponse(error)) return boundary.error(error);
+
+  return (
+    <s-page heading="Freshness overview" inlineSize="large">
+      <s-banner tone="critical" heading="Couldn't load the dashboard">
+        <s-paragraph>
+          Shopify may be unreachable, or this view couldn&apos;t load.
+        </s-paragraph>
+        <s-button
+          slot="secondary-actions"
+          loading={revalidator.state === "loading" || undefined}
+          onClick={() => revalidator.revalidate()}
+        >
+          Try again
+        </s-button>
+        {/* A way out when one filter, sort or page keeps failing */}
+        <s-button slot="secondary-actions" href="/app">
+          Show all products
+        </s-button>
+      </s-banner>
+    </s-page>
+  );
+}
 
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
