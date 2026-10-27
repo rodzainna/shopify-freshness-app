@@ -31,6 +31,8 @@ export function fakeShopify({ delayMs = 0 } = {}) {
   const inventories = new Map<string, ProductInventory>();
   // Handle → id, for batches created by handle
   const handles = new Map<string, string>();
+  // Product id → handle, for reads that return it
+  const productHandles = new Map<string, string>();
   let nextBatchNumber = 1000;
   const isListed = (id: string) =>
     [...products.values()].some(({ batchIds }) => batchIds?.includes(id));
@@ -90,6 +92,20 @@ export function fakeShopify({ delayMs = 0 } = {}) {
               }),
               pageInfo: { hasNextPage: false },
             },
+          },
+        },
+      };
+    },
+    GetBatchListIds: ({ productId }) => {
+      const product = products.get(productId as string);
+      if (!product) return { product: null };
+      const { batchIds } = product;
+      return {
+        product: {
+          handle: productHandles.get(productId as string) ?? "demo-product",
+          list: batchIds && {
+            value: JSON.stringify(batchIds),
+            compareDigest: listDigest(batchIds),
           },
         },
       };
@@ -246,6 +262,9 @@ export function fakeShopify({ delayMs = 0 } = {}) {
     // Gives a stored batch the handle it was created under
     setHandle(id: string, handle: string) {
       handles.set(handle, id);
+    },
+    setProductHandle(productId: string, handle: string) {
+      productHandles.set(productId, handle);
     },
     setInventory(productId: string, inventory: ProductInventory) {
       inventories.set(productId, inventory);
