@@ -48,9 +48,15 @@ export default function SeedDemoPage() {
   // A single retry also counts, so two reseeds of one product can't race
   const busy =
     running || Object.values(states).some(({ kind }) => kind === "running");
-  const stockDiffers = rows.filter(
-    (row) => row.productId && row.plannedStock !== row.storeStock,
+  const inStore = rows.flatMap(({ productId, ...row }) =>
+    productId ? [{ ...row, productId }] : [],
   );
+  const stockDiffers = inStore.filter(
+    ({ plannedStock, storeStock }) => plannedStock !== storeStock,
+  ).length;
+  let reseedLabel = `Reseed all ${inStore.length} products`;
+  if (inStore.length === 0) reseedLabel = "No demo products to reseed";
+  if (inStore.length === 1) reseedLabel = "Reseed 1 product";
 
   const reseed = async (handle: string, productId: string) => {
     setStates((current) => ({ ...current, [handle]: { kind: "running" } }));
@@ -71,8 +77,8 @@ export default function SeedDemoPage() {
   const reseedAll = async () => {
     setRunning(true);
     // One at a time, so each product's writes finish before the next starts
-    for (const { handle, productId } of rows) {
-      if (productId) await reseed(handle, productId);
+    for (const { handle, productId } of inStore) {
+      await reseed(handle, productId);
     }
     setRunning(false);
   };
@@ -103,17 +109,20 @@ export default function SeedDemoPage() {
               variant="primary"
               onClick={reseedAll}
               loading={running || undefined}
-              disabled={busy || undefined}
+              disabled={busy || inStore.length === 0 || undefined}
             >
-              Reseed all {rows.filter((row) => row.productId).length} products
+              {reseedLabel}
             </s-button>
             <s-button onClick={downloadStockCsv}>Download stock CSV</s-button>
           </s-stack>
-          {stockDiffers.length > 0 && (
+          {stockDiffers > 0 && (
             <s-banner tone="warning" heading="Stock differs from the plan">
-              {stockDiffers.length} products don&apos;t have their planned stock
-              available. Import the stock CSV in Products → Inventory to reset
-              it. Units held by unfulfilled orders still count as a difference.
+              {stockDiffers === 1
+                ? "1 product doesn't have its"
+                : `${stockDiffers} products don't have their`}{" "}
+              planned stock available. Import the stock CSV in Products →
+              Inventory to reset it. Units held by unfulfilled orders still
+              count as a difference.
             </s-banner>
           )}
         </s-stack>
