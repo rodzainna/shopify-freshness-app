@@ -167,6 +167,32 @@ export interface SetBatchFieldsData {
   metaobjectUpdate: UserErrorsPayload | null;
 }
 
+export const DELETE_BATCH_MUTATION = `#graphql
+  mutation DeleteBatch($id: ID!) {
+    metaobjectDelete(id: $id) {
+      deletedId
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
+
+export interface DeleteBatchData {
+  metaobjectDelete: (UserErrorsPayload & { deletedId: string | null }) | null;
+}
+
+// A batch that's already gone counts as deleted
+export function deleteBatchErrors(
+  payload: DeleteBatchData["metaobjectDelete"] | undefined,
+): UserErrorsPayload["userErrors"] {
+  return (payload?.userErrors ?? []).filter(
+    (error) => error.code !== "RECORD_NOT_FOUND",
+  );
+}
+
 // Writes only the batch list, failing with STALE_OBJECT if it changed since read
 export const SAVE_BATCH_LIST_MUTATION = `#graphql
   mutation SaveBatchList(
