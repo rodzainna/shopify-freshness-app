@@ -72,17 +72,25 @@ export function isCalendarDate(dateString: string): boolean {
  *
  * @param timezone - the shop's IANA timezone, e.g. "Asia/Manila"
  * @param now - the current instant
- * @throws RangeError for an invalid timezone, rather than guess a wrong date
+ * @throws RangeError for an invalid timezone or an unreadable result,
+ *   rather than guess a wrong date
  */
 export function getShopToday(timezone: string, now: Date): string {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
+  // Built from parts, so the result doesn't depend on a locale's date format
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  });
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value;
 
-  return formatter.format(now);
+  const today = `${part("year")}-${part("month")}-${part("day")}`;
+  if (!isCalendarDate(today)) {
+    throw new RangeError(`Couldn't read today's date for ${timezone}`);
+  }
+  return today;
 }
 
 /**
@@ -111,6 +119,17 @@ export function computeBatchFreshness(
   return { status, daysRemaining };
 }
 
+// Null for an unreadable batch date. A bad `today` still throws: it's a
+// whole-page problem, so it should show as an error, not as missing badges.
+export function batchFreshnessOrNull(
+  expirationDate: string,
+  today: string,
+): BatchFreshness | null {
+  return isCalendarDate(expirationDate)
+    ? computeBatchFreshness(expirationDate, today)
+    : null;
+}
+
 export function isPositiveWholeNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
@@ -118,14 +137,19 @@ export function isPositiveWholeNumber(value: unknown): value is number {
 // FEFO never takes from these; an unreadable date can't be judged expired
 export function isExpired(batch: Batch, today: string): boolean {
   return (
-    isCalendarDate(batch.expirationDate) &&
-    computeBatchFreshness(batch.expirationDate, today).status === "Expired"
+    batchFreshnessOrNull(batch.expirationDate, today)?.status === "Expired"
   );
 }
 
 // One definition of stock for every freshness calculation
 export function isInStock(batch: Batch): boolean {
   return isPositiveWholeNumber(batch.quantity);
+}
+
+// Stored with no usable stock and not being restocked. Clearing a field to
+// retype it doesn't flip the badge; typing a restock shows the live status.
+export function showsSoldOut(stored: Batch | undefined, typed: Batch): boolean {
+  return stored !== undefined && !isInStock(stored) && !isInStock(typed);
 }
 
 // Batches that set a product's status and earliest date. Bad dates are

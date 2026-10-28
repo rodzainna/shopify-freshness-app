@@ -41,14 +41,14 @@ The app runs on a development store with 60 demo food products. It isn't deploye
 
 **Product page panel** (Admin UI extension on the product details page)
 
-- Add, edit and remove batches, each with a quantity and an expiration date. Every row shows a live status badge.
+- Add, edit and remove batches, each with a quantity and an expiration date. Every row shows a live status badge, or **Sold out** for a stored batch with no usable stock (see Dashboard).
 - Validation: quantity must be a whole number from 1 to 1,000,000,000, and the expiration date is required. Past dates are allowed, because expired stock exists until it's removed.
 - A non-blocking warning when the batches add up to more than the product's tracked inventory.
 - Load and save errors are shown in the panel, never silently swallowed. Most failed loads can be retried in place.
 
 **Dashboard** (the app's home page)
 
-- Each product's overall status, earliest expiry and a per-batch breakdown, with a thumbnail and a link to its admin page. It shows 50 products per page in the chosen sort order, and up to 10 batches each. A page picker ("Page 3 of 9") jumps to any page; it counts with Shopify's `productsCount` and reaches later pages with cursor-only queries, so only the page shown loads its batches. A batch with 0 units or fewer shows **Sold out** instead of an expiry badge. The app deletes the batches it empties, so this only comes from an edit made outside the app (see Known limitations).
+- Each product's overall status, earliest expiry and a per-batch breakdown, with a thumbnail and a link to its admin page. It shows 50 products per page in the chosen sort order, and up to 10 batches each. A page picker ("Page 3 of 9") jumps to any page; it counts with Shopify's `productsCount` and reaches later pages with cursor-only queries, so only the page shown loads its batches. A batch with 0 units or fewer, or a quantity that isn't a whole number, shows **Sold out** instead of an expiry badge, here, in the editor and in the panel. Clearing a quantity to retype it doesn't show it; typing a restock shows the live status instead. The app deletes the batches it empties, so this only comes from an edit made outside the app (see Known limitations).
 - Stock next to the units in batches, with a **Stock check** column that flags batches over stock ("5 over") or stock no batch covers ("8 unbatched").
 - Search, sorting by product, stock, type, vendor or earliest expiry (soonest first, listing products that have an expiry date; Shopify can't sort by a metafield, so the app reads up to 1,000 dates cheaply, sorts them, and then loads only the page shown with its batches), and filters for type, vendor, status, stock check, tracked products and expiry. The expiry filter offers "Already expired", "Today", "Next 7 days", "Next 30 days" (counted from the shop's own date) or a custom range, matched against each product's earliest in-stock expiry by Shopify's search. Sort and filters live in the URL, and clearing the filters keeps the sort.
 - An editor per product: change batch quantities and dates, or add new batches (up to 25 per save), including to a product that has none. A running total of stock and batch units updates as you type. Saves take the product's lock and refuse if the batches changed since the editor opened. Removing a batch stays in the product panel.
