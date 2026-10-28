@@ -653,7 +653,7 @@ function Extension({
             <s-stack direction="block" gap="small-200">
               <s-grid gridTemplateColumns={ROW_COLUMNS} columnGap="base">
                 <s-text>Quantity</s-text>
-                <s-text>Expiry Date *</s-text>
+                <s-text>Expiry date *</s-text>
                 <s-text>Status</s-text>
               </s-grid>
               {batches.map((batch) => {
@@ -688,7 +688,7 @@ function Extension({
                       }
                     />
                     <s-date-field
-                      label="Expiry Date"
+                      label="Expiry date"
                       labelAccessibilityVisibility="exclusive"
                       value={batch.expirationDate}
                       required
