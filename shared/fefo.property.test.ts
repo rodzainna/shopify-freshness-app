@@ -1,7 +1,5 @@
-// Checks decrementFefo against a deliberately simple reference on thousands of
-// random batch lists, so combinations no hand-written case covers (expired,
-// unreadable, sold-out and fractional batches together) are exercised too.
-// The seed is fixed, so any failure reproduces exactly.
+// Compares decrementFefo with a simple reference on thousands of random mixes
+// of expired, unreadable, sold-out and fractional batches, from a fixed seed.
 import { describe, it, expect } from "vitest";
 
 import { decrementFefo } from "./fefo";

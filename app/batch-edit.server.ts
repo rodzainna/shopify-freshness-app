@@ -104,10 +104,8 @@ async function readForEdit(
 }
 
 /**
- * Saves the dashboard editor's changes under the product's lock, so a
- * fulfillment can't interleave. Nothing is written if the batches changed
- * since the editor opened. New batches are linked before edits are written,
- * so a list that changed meanwhile still means nothing was saved.
+ * Saves the editor's changes under the product lock; refused if batches changed
+ * since opening. New batches link first, so a list conflict writes no edits.
  *
  * @throws MismatchedEditsError if `edited` doesn't cover exactly the opened
  *   batches, or a new batch's handle is bad or already used by a listed batch

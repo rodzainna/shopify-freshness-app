@@ -162,9 +162,8 @@ function collectErrors<T extends Batch>(
 }
 
 /**
- * Decides what a dashboard save writes. `opened` is what the editor showed,
- * `current` is read again under the product's lock, `edited` is the form's
- * opened batches and `added` its new ones.
+ * Plans a dashboard save. `opened` is what the editor showed, `current` is
+ * re-read under the lock, `edited` all opened rows as edited, `added` new ones.
  *
  * @throws MismatchedEditsError if `edited` doesn't cover exactly the opened
  *   batches, or `added` has a handle that's repeated or not a UUID
