@@ -178,3 +178,7 @@ Tests that touch the database recreate `prisma/test.sqlite` from the migrations 
 ## Privacy
 
 [PRIVACY.md](PRIVACY.md) covers what the app receives and stores, retention and the data processing terms.
+
+## License
+
+You may read the code, fork it on GitHub, and clone and run it on your own machine or a Shopify development store to evaluate it. Reusing the code written for this project elsewhere, redistributing it or using it commercially needs the author's written permission. Code that comes from Shopify stays under Shopify's terms. See [LICENSE](LICENSE).
