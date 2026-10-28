@@ -19,8 +19,9 @@ export const listDigest = (batchIds: string[]) =>
   `digest:${JSON.stringify(batchIds)}`;
 
 /**
- * An in-memory store answering the app's fulfillment GraphQL operations, so
- * tests can check what Shopify ends up holding after failures and retries.
+ * An in-memory store answering the batch operations that fulfillment, the
+ * editor and reseeding use, so tests can check what Shopify ends up holding
+ * after failures and retries.
  * `delayMs` makes every call take that long, so concurrent work overlaps.
  * It uses real timers, so it hangs under vi.useFakeTimers().
  */

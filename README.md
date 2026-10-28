@@ -147,7 +147,7 @@ extensions/
   freshness-panel/   product page Admin UI extension
 shared/          pure, unit-tested logic used by the app and the extension
 prisma/          schema and migrations
-test/            test database helpers and an in-memory Shopify for fulfillment tests
+test/            test database helpers and an in-memory Shopify for the fulfillment, editor and reseeding tests
 ```
 
 ## Running locally
@@ -172,6 +172,16 @@ npm run typecheck       # app types, including generated route types
 npm run typecheck:ext   # extension types
 npm run lint
 ```
+
+Besides the example-based tests:
+
+- **FEFO has a property test:** 5,000 random cases (batch lists and requested quantities, including invalid ones) checked against a deliberately simple reference, with a fixed seed so any failure reproduces exactly.
+- **Fulfillment, the dashboard editor and reseeding a product** run against `test/fake-shopify.ts`, an in-memory Admin API that can make any call fail, or time out after its write lands. The cases include:
+  - a fulfillment that failed halfway and must not decrement twice on retry
+  - a plan dropped because a merchant edited the batches before the retry
+  - fulfillment shortfalls
+  - an editor save whose write landed but whose response was lost, and an editor list write refused because the list changed
+- **The per-product lock** is tested with many simultaneous callers, and checked never to run two updates of one product at once.
 
 Tests that touch the database recreate `prisma/test.sqlite` from the migrations on every run, so they never touch development data. Git hooks run lint-staged on commit, check commit messages against Conventional Commits, and run every check above (plus a format check) before a push.
 
