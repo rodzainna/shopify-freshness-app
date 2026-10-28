@@ -68,14 +68,11 @@ export function isCalendarDate(dateString: string): boolean {
 }
 
 /**
- * We want to know the actual shop's date now/today
+ * The shop's local date today, as "YYYY-MM-DD".
  *
  * @param timezone - the shop's IANA timezone, e.g. "Asia/Manila"
  * @param now - the current instant
- * @returns YYYY-MM-DD date format of the shop's date today
- * @throws RangeError if `timezone` isn't a real IANA timezone name —
- *   deliberately not caught here; an invalid shop timezone should fail
- *   loudly, not silently default to something wrong.
+ * @throws RangeError for an invalid timezone, rather than guess a wrong date
  */
 export function getShopToday(timezone: string, now: Date): string {
   const formatter = new Intl.DateTimeFormat("en-CA", {

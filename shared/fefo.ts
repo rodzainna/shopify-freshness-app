@@ -20,14 +20,11 @@ export interface FefoResult<T extends Batch> {
 
 /**
  * First expired, first out: takes `quantity` units from the soonest-expiring
- * in-stock batches, splitting across batches when one runs out. Expired
- * batches are never used, since expired stock shouldn't be shipped. Pure, so
- * the caller decides how to write the result.
+ * in-stock batches, skipping expired ones. Pure; the caller writes the result.
  *
  * @param batches - each batch once; callers dedupe by id
  * @param today - the shop-local "today", "YYYY-MM-DD" (see getShopToday)
- * @throws if `today` isn't a YYYY-MM-DD date, since a bad one would
- *   silently change which batches count as expired
+ * @throws if `today` isn't a real YYYY-MM-DD date, rather than misjudge expiry
  */
 export function decrementFefo<T extends Batch>(
   batches: T[],
