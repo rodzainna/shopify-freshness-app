@@ -2,7 +2,31 @@
 
 An embedded Shopify app for stores that sell perishable goods. Merchants record stock in **batches**, each with a quantity and an expiration date, and see which products are fresh, close to expiry or expired. When an order is fulfilled, stock comes out of the soonest-expiring batch first (**FEFO**, first expired, first out).
 
-It's a portfolio project, built to show custom Shopify app work end to end. It runs on a development store only.
+It's a portfolio project, built to show custom Shopify app work end to end.
+
+## Demo
+
+The app runs on a development store with 60 demo food products. It isn't deployed or listed on the Shopify App Store. The GIF and screenshots below were captured on that store. A dev-only reseed page (`/app/dev/seed-demo`) replaces those products' batches with planned ones, dated relative to the day it runs. The products themselves and their photos must already be in the store; the page matches them by handle.
+
+![An order for 10 Banana bread is fulfilled, and the dashboard drops its batch](docs/images/fulfillment.gif)
+
+1. **Record batches on the product page.** The panel on each product lists its batches, with a live status badge per row, and warns when they add up to more than the tracked stock.
+
+   ![The freshness panel on a product page](docs/images/panel.png)
+
+2. **See what's expired or expiring soon.** The dashboard shows each product's status and earliest expiry. Sort by earliest expiry, or filter to "Next 7 days".
+
+   ![The dashboard sorted by earliest expiry](docs/images/dashboard.png)
+
+3. **Spot stock that doesn't match.** The Stock check column flags batches over stock ("5 over") or stock no batch covers ("8 unbatched"). The Stock filter lists just those products.
+
+   ![The dashboard filtered to products with more in batches than in stock](docs/images/stock-check.png)
+
+4. **Fulfill an order, and the batches update.** Fulfilling 10 Banana bread takes all 10 units out of its batch. The emptied batch is removed, and the product's earliest expiry is cleared (the GIF at the top). With several batches, units come from the soonest-expiring unexpired one first (FEFO); expired batches are never used.
+
+5. **Edit batches from the dashboard.** Change quantities and dates, or add batches, without opening each product.
+
+   ![The dashboard's batch editor](docs/images/editor.png)
 
 ## Status
 
@@ -24,7 +48,7 @@ It's a portfolio project, built to show custom Shopify app work end to end. It r
 
 **Dashboard** (the app's home page)
 
-- Each product's overall status, earliest expiry and a per-batch breakdown, with a thumbnail and a link to its admin page. Sold-out batches are marked as such. It shows 50 products per page in the chosen sort order, and up to 10 batches each. A page picker ("Page 3 of 9") jumps to any page; it counts with Shopify's `productsCount` and reaches later pages with cursor-only queries, so only the page shown loads its batches.
+- Each product's overall status, earliest expiry and a per-batch breakdown, with a thumbnail and a link to its admin page. It shows 50 products per page in the chosen sort order, and up to 10 batches each. A page picker ("Page 3 of 9") jumps to any page; it counts with Shopify's `productsCount` and reaches later pages with cursor-only queries, so only the page shown loads its batches.
 - Stock next to the units in batches, with a **Stock check** column that flags batches over stock ("5 over") or stock no batch covers ("8 unbatched").
 - Search, sorting by product, stock, type, vendor or earliest expiry (soonest first, listing products that have an expiry date; Shopify can't sort by a metafield, so the app reads up to 1,000 dates cheaply, sorts them, and then loads only the page shown with its batches), and filters for type, vendor, status, stock check, tracked products and expiry. The expiry filter offers "Already expired", "Today", "Next 7 days", "Next 30 days" (counted from the shop's own date) or a custom range, matched against each product's earliest in-stock expiry by Shopify's search. Sort and filters live in the URL, and clearing the filters keeps the sort.
 - An editor per product: change batch quantities and dates, or add new batches (up to 25 per save), including to a product that has none. A running total of stock and batch units updates as you type. Saves take the product's lock and refuse if the batches changed since the editor opened. Removing a batch stays in the product panel.
@@ -111,7 +135,8 @@ Planned, not scheduled:
 
 ```
 app/
-  routes/        dashboard, batch editor endpoint, privacy page, auth, webhook handlers
+  routes/        dashboard, batch editor endpoint, privacy page, auth, webhook handlers, dev-only reseed page
+  dev/           demo data, reseed logic, and the guard that makes the dev routes 404 outside development
   batch-edit.server.ts           load and save the dashboard editor's batches
   fulfillment-jobs.server.ts     save, run, retry and sweep fulfillment jobs
   fulfillment.server.ts          apply a fulfillment to each product's batches
