@@ -128,15 +128,17 @@ export function isInStock(batch: Batch): boolean {
   return isPositiveWholeNumber(batch.quantity);
 }
 
+// Batches that set a product's status and earliest date. Bad dates are
+// skipped, not thrown on, so one bad batch can't break a page.
+function isActiveBatch(batch: Batch): boolean {
+  return isInStock(batch) && isCalendarDate(batch.expirationDate);
+}
+
 export function computeAggregateFreshness(
   batches: Batch[],
   today: string,
 ): FreshnessStatus | "Not set" {
-  // Skips unreadable dates rather than throwing, so one bad batch can't
-  // break a whole page
-  const activeBatches = batches.filter(
-    (batch) => isInStock(batch) && isCalendarDate(batch.expirationDate),
-  );
+  const activeBatches = batches.filter(isActiveBatch);
 
   if (activeBatches.length === 0) {
     return "Not set";
@@ -152,14 +154,14 @@ export function computeAggregateFreshness(
 }
 
 /**
- * The product-level date the storefront shows. Only in-stock batches count,
- * matching computeAggregateFreshness: a sold-out batch shouldn't set it.
+ * The product-level date the storefront shows. Sold-out batches and
+ * unreadable dates don't count.
  *
- * @returns the soonest "YYYY-MM-DD" expiry, or null if no batch is in stock
+ * @returns the soonest "YYYY-MM-DD" expiry, or null if no batch qualifies
  */
 export function getEarliestExpirationDate(batches: Batch[]): string | null {
   const dates = batches
-    .filter((batch) => isInStock(batch) && batch.expirationDate)
+    .filter(isActiveBatch)
     .map((batch) => batch.expirationDate);
 
   // YYYY-MM-DD strings sort in calendar order, so no date parsing is needed
