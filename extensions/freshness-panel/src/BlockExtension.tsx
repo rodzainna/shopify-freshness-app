@@ -1,10 +1,10 @@
 import "@shopify/ui-extensions/preact";
 import {
-  type BatchFreshness,
+  batchFreshnessOrNull,
   formatDaysRemaining,
-  computeBatchFreshness,
   getEarliestExpirationDate,
   getShopToday,
+  showsSoldOut,
   FRESHNESS_TONE,
 } from "../../../shared/freshness";
 import {
@@ -91,19 +91,6 @@ const ROW_COLUMNS =
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function getFreshness(
-  expirationDate: string,
-  today: string,
-): BatchFreshness | null {
-  if (!expirationDate) return null;
-
-  try {
-    return computeBatchFreshness(expirationDate, today);
-  } catch {
-    return null;
-  }
 }
 
 function LoadError({
@@ -362,6 +349,8 @@ function Extension({
     ]);
   }
 
+  // As of the last load or save
+  const storedById = new Map(saved.map((row) => [row.id, row]));
   const mismatch = getInventoryMismatch(batches, inventory);
   const unbatched = compareStock(batches, inventory).unbatchedStock;
 
@@ -398,12 +387,16 @@ function Extension({
           <s-query-container>
             <s-stack direction="block" gap="small-200">
               <s-grid gridTemplateColumns={ROW_COLUMNS} columnGap="base">
-                <s-text>Quantity</s-text>
-                <s-text>Expiry date *</s-text>
-                <s-text>Status</s-text>
+                {/* Visual only: each field and badge reads on its own */}
+                <s-text accessibilityVisibility="hidden">Quantity *</s-text>
+                <s-text accessibilityVisibility="hidden">Expiry date *</s-text>
+                <s-text accessibilityVisibility="hidden">Status</s-text>
               </s-grid>
               {batches.map((batch) => {
-                const freshness = getFreshness(batch.expirationDate, today);
+                const freshness = batchFreshnessOrNull(
+                  batch.expirationDate,
+                  today,
+                );
                 const errors = showErrors ? validateBatch(batch) : {};
 
                 // One grid per row: mounting several keyed Fragments into a
@@ -425,6 +418,7 @@ function Extension({
                       min={1}
                       max={MAX_QUANTITY}
                       step={1}
+                      required
                       error={errors.quantity}
                       disabled={saving}
                       onChange={(event) =>
@@ -446,7 +440,9 @@ function Extension({
                         })
                       }
                     />
-                    {freshness ? (
+                    {showsSoldOut(storedById.get(batch.id), batch) ? (
+                      <s-badge>Sold out</s-badge>
+                    ) : freshness ? (
                       <s-badge tone={FRESHNESS_TONE[freshness.status]}>
                         {formatDaysRemaining(freshness.daysRemaining)}
                       </s-badge>

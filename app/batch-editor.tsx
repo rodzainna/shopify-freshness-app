@@ -13,9 +13,9 @@ import {
 import {
   type Batch,
   FRESHNESS_TONE,
-  computeBatchFreshness,
+  batchFreshnessOrNull,
   formatDaysRemaining,
-  isCalendarDate,
+  showsSoldOut,
 } from "../shared/freshness";
 import {
   type ProductInventory,
@@ -225,6 +225,8 @@ export function BatchEditor({
   const atAddLimit = added.length >= maxNewBatches(edited.length);
   // The dashboard row may be stale, so loaded batches decide once they're in
   const hasBatches = ready ? opened.length > 0 : target?.hasBatches !== false;
+  // As the editor opened them
+  const openedById = new Map(opened.map((batch) => [batch.id, batch]));
   const verb = hasBatches ? "Edit" : "Add";
 
   return (
@@ -239,9 +241,10 @@ export function BatchEditor({
         <s-stack key={formVersion} gap="small-200">
           {rowCount > 0 && (
             <s-grid gridTemplateColumns={ROW_COLUMNS} columnGap="base">
-              <s-text>Quantity</s-text>
-              <s-text>Expiry date</s-text>
-              <s-text>Status</s-text>
+              {/* Visual only: each field and badge reads on its own */}
+              <s-text accessibilityVisibility="hidden">Quantity *</s-text>
+              <s-text accessibilityVisibility="hidden">Expiry date *</s-text>
+              <s-text accessibilityVisibility="hidden">Status</s-text>
             </s-grid>
           )}
           {edited.map((batch) => (
@@ -250,6 +253,7 @@ export function BatchEditor({
               batch={batch}
               errors={errors[batch.id]}
               today={today}
+              soldOut={showsSoldOut(openedById.get(batch.id), batch)}
               disabled={saving}
               onChange={(change) => update(batch.id, change)}
             />
@@ -364,6 +368,7 @@ function BatchRow({
   batch,
   errors = {},
   today,
+  soldOut = false,
   disabled,
   onChange,
   onRemove,
@@ -372,15 +377,14 @@ function BatchRow({
   batch: Batch;
   errors?: BatchErrors;
   today: string;
+  soldOut?: boolean;
   disabled: boolean;
   onChange: (change: Partial<Batch>) => void;
   // Only new rows; removing a saved batch is left to the product panel
   onRemove?: () => void;
   removeLabel?: string;
 }) {
-  const freshness = isCalendarDate(batch.expirationDate)
-    ? computeBatchFreshness(batch.expirationDate, today)
-    : null;
+  const freshness = batchFreshnessOrNull(batch.expirationDate, today);
   return (
     <s-grid
       gridTemplateColumns={ROW_COLUMNS}
@@ -395,6 +399,7 @@ function BatchRow({
         min={1}
         max={MAX_QUANTITY}
         step={1}
+        required
         error={errors.quantity}
         disabled={disabled || undefined}
         onInput={({ currentTarget: { value } }) =>
@@ -405,6 +410,7 @@ function BatchRow({
         label="Expiry date"
         labelAccessibilityVisibility="exclusive"
         value={batch.expirationDate}
+        required
         error={errors.expirationDate}
         disabled={disabled || undefined}
         onChange={(event) =>
@@ -412,10 +418,14 @@ function BatchRow({
         }
       />
       <s-box>
-        {freshness && (
-          <s-badge tone={FRESHNESS_TONE[freshness.status]}>
-            {formatDaysRemaining(freshness.daysRemaining)}
-          </s-badge>
+        {soldOut ? (
+          <s-badge>Sold out</s-badge>
+        ) : (
+          freshness && (
+            <s-badge tone={FRESHNESS_TONE[freshness.status]}>
+              {formatDaysRemaining(freshness.daysRemaining)}
+            </s-badge>
+          )
         )}
       </s-box>
       <s-box>

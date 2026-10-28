@@ -11,6 +11,9 @@ import {
   formatDaysRemaining,
   getEarliestExpirationDate,
   addDays,
+  batchFreshnessOrNull,
+  showsSoldOut,
+  isCalendarDate,
 } from "./freshness";
 
 describe("addDays", () => {
@@ -52,6 +55,47 @@ describe("computeBatchFreshness", () => {
   });
 });
 
+describe("batchFreshnessOrNull", () => {
+  it("computes freshness when both dates can be read", () => {
+    expect(batchFreshnessOrNull("2026-09-15", "2026-09-12")).toStrictEqual({
+      status: "Use Soon",
+      daysRemaining: 3,
+    });
+  });
+
+  it.each([
+    ["a missing expiry date", "", "2026-09-12"],
+    ["an expiry date that doesn't exist", "2026-02-30", "2026-09-12"],
+  ])("is null for %s", (_, expirationDate, today) => {
+    expect(batchFreshnessOrNull(expirationDate, today)).toBeNull();
+  });
+
+  it("still throws for an unreadable today, which would break every row", () => {
+    expect(() => batchFreshnessOrNull("2026-09-15", "12/09/2026")).toThrow();
+  });
+});
+
+describe("showsSoldOut", () => {
+  const batch = (quantity: number) => ({
+    quantity,
+    expirationDate: "2026-11-01",
+  });
+
+  it.each([
+    ["stored at 0 and untouched", batch(0), batch(0), true],
+    ["stored at 0 and cleared to retype", batch(0), batch(Number.NaN), true],
+    ["stored negative", batch(-2), batch(-2), true],
+    ["stored fractional", batch(2.5), batch(2.5), true],
+    ["stored as NaN", batch(Number.NaN), batch(Number.NaN), true],
+    ["stored at 0 with a restock typed", batch(0), batch(5), false],
+    ["in stock and cleared to retype", batch(7), batch(Number.NaN), false],
+    ["in stock", batch(7), batch(7), false],
+    ["new, so nothing is stored", undefined, batch(0), false],
+  ])("for a batch %s is %s", (_, stored, typed, expected) => {
+    expect(showsSoldOut(stored, typed)).toBe(expected);
+  });
+});
+
 describe("getShopToday", () => {
   it("uses the shop's local date across a day boundary, not the UTC date", () => {
     // 11pm UTC on the 12th is already 7am on the 13th in Manila (UTC+8)
@@ -63,6 +107,16 @@ describe("getShopToday", () => {
     // 2am UTC on the 12th is still 7pm on the 11th in Los Angeles (UTC-7 in September, daylight saving)
     const instant = new Date("2026-09-12T02:00:00.000Z");
     expect(getShopToday("America/Los_Angeles", instant)).toBe("2026-09-11");
+  });
+
+  it("returns a date every freshness function can read", () => {
+    const today = getShopToday("Asia/Manila", new Date("2026-01-05T12:00:00Z"));
+    expect(today).toBe("2026-01-05");
+    expect(isCalendarDate(today)).toBe(true);
+  });
+
+  it("throws for an invalid timezone", () => {
+    expect(() => getShopToday("Not/AZone", new Date())).toThrow(RangeError);
   });
 });
 

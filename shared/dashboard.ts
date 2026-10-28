@@ -1,9 +1,8 @@
 import {
   type BatchFreshness,
   type FreshnessStatus,
+  batchFreshnessOrNull,
   computeAggregateFreshness,
-  computeBatchFreshness,
-  isCalendarDate,
 } from "./freshness";
 import { type ProductInventory, compareStock } from "./inventory";
 import { type BatchNode, isReadableBatch } from "./product-metafields";
@@ -111,9 +110,7 @@ export function toDashboardRows(
         id: node.id,
         quantity: Number(node.quantity?.value ?? 0),
         expirationDate,
-        freshness: isCalendarDate(expirationDate)
-          ? computeBatchFreshness(expirationDate, today)
-          : null,
+        freshness: batchFreshnessOrNull(expirationDate, today),
       };
     });
 
