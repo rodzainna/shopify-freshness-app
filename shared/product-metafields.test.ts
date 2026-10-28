@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  deleteBatchErrors,
   isReadableBatch,
   planProductMetafieldWrites,
   saveProductFreshnessVariables,
@@ -92,5 +93,28 @@ describe("saveProductFreshnessVariables", () => {
         "2026-10-22",
       ),
     ).toMatchObject({ delete: [], hasSet: true, hasDelete: false });
+  });
+});
+
+describe("deleteBatchErrors", () => {
+  const error = (code: string) => ({ field: ["id"], message: code, code });
+  const payload = (...codes: string[]) => ({
+    deletedId: null,
+    userErrors: codes.map(error),
+  });
+
+  it("treats a batch that's already gone as deleted", () => {
+    expect(deleteBatchErrors(payload("RECORD_NOT_FOUND"))).toEqual([]);
+  });
+
+  it("keeps any other error", () => {
+    expect(
+      deleteBatchErrors(payload("RECORD_NOT_FOUND", "NOT_AUTHORIZED")),
+    ).toEqual([error("NOT_AUTHORIZED")]);
+  });
+
+  it("is empty when there's no payload, leaving that to the caller", () => {
+    expect(deleteBatchErrors(null)).toEqual([]);
+    expect(deleteBatchErrors(undefined)).toEqual([]);
   });
 });

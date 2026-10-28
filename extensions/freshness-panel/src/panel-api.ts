@@ -1,6 +1,8 @@
 import { collectErrorMessages } from "../../../shared/graphql-errors";
 import { type ProductInventory } from "../../../shared/inventory";
 import {
+  DELETE_BATCH_MUTATION,
+  type DeleteBatchData,
   MAX_BATCHES,
   SAVE_BATCH_LIST_MUTATION,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
@@ -10,7 +12,7 @@ import {
   type SetBatchFieldsData,
   UPSERT_BATCH_MUTATION,
   type UpsertBatchData,
-  type UserErrorsPayload,
+  deleteBatchErrors,
   isReadableBatch,
   saveBatchListVariables,
   saveProductFreshnessVariables,
@@ -245,30 +247,16 @@ export async function readCurrent(
   return loadPanelData(productId).catch(() => null);
 }
 
-interface DeleteBatchData {
-  metaobjectDelete: UserErrorsPayload | null;
-}
-
 export async function deleteBatch(id: string): Promise<void> {
   const { data, errors } = await shopify.query<DeleteBatchData>(
-    `
-    mutation DeleteBatch($id: ID!) {
-      metaobjectDelete(id: $id) {
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `,
+    DELETE_BATCH_MUTATION,
     { variables: { id } },
   );
 
   const messages = collectErrorMessages(
     errors,
-    data?.metaobjectDelete?.userErrors,
+    deleteBatchErrors(data?.metaobjectDelete),
   );
-
   if (messages.length > 0) {
     throw new Error(`Deleting batch failed: ${messages.join("; ")}`);
   }

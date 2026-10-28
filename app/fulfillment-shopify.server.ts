@@ -10,6 +10,8 @@ import { getShopToday } from "../shared/freshness";
 import { collectErrorMessages } from "../shared/graphql-errors";
 import type { ProductInventory } from "../shared/inventory";
 import {
+  DELETE_BATCH_MUTATION,
+  type DeleteBatchData,
   MAX_BATCHES,
   SAVE_BATCH_LIST_MUTATION,
   SAVE_PRODUCT_FRESHNESS_MUTATION,
@@ -21,6 +23,7 @@ import {
   saveEarliestDateVariables,
   type BatchNode,
   type UserErrorsPayload,
+  deleteBatchErrors,
   isReadableBatch,
   saveBatchListVariables,
   saveProductFreshnessVariables,
@@ -510,28 +513,13 @@ async function setBatchFields(
 }
 
 async function deleteBatch(admin: AdminApiContext, id: string): Promise<void> {
-  const data = await query<{
-    metaobjectDelete: UserErrorsPayload | null;
-  }>(
-    admin,
-    `#graphql
-      mutation DeleteBatch($id: ID!) {
-        metaobjectDelete(id: $id) {
-          deletedId
-          userErrors {
-            field
-            message
-            code
-          }
-        }
-      }`,
-    { id },
+  const data = await query<DeleteBatchData>(admin, DELETE_BATCH_MUTATION, {
+    id,
+  });
+  throwOnUserErrors(
+    `Deleting batch ${id}`,
+    deleteBatchErrors(data.metaobjectDelete),
   );
-  // Already gone means an earlier attempt deleted it
-  const errors = data.metaobjectDelete?.userErrors.filter(
-    (error) => error.code !== "RECORD_NOT_FOUND",
-  );
-  throwOnUserErrors(`Deleting batch ${id}`, errors);
 }
 
 function throwIfListStale(
