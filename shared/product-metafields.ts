@@ -2,6 +2,7 @@ export interface MetafieldWrite {
   ownerId: string;
   key: string;
   value: string;
+  compareDigest?: string | null;
 }
 
 export interface MetafieldIdentifier {
@@ -31,6 +32,8 @@ export function planProductMetafieldWrites(
   productId: string,
   batchIds: string[],
   earliestExpirationDate: string | null,
+  // When given, the list write is refused if the list changed since read
+  listDigest?: string | null,
 ): { set: MetafieldWrite[]; delete: MetafieldIdentifier[] } {
   const set: MetafieldWrite[] = [];
   const toDelete: MetafieldIdentifier[] = [];
@@ -40,6 +43,7 @@ export function planProductMetafieldWrites(
       ownerId: productId,
       key: "freshness_batches",
       value: JSON.stringify(batchIds),
+      ...(listDigest !== undefined && { compareDigest: listDigest }),
     });
   } else {
     toDelete.push({
@@ -82,6 +86,7 @@ export const SAVE_PRODUCT_FRESHNESS_MUTATION = `#graphql
       userErrors {
         field
         message
+        code
       }
     }
     metafieldsDelete(metafields: $delete) @include(if: $hasDelete) {
@@ -215,9 +220,15 @@ export function saveProductFreshnessVariables(
   productId: string,
   batchIds: string[],
   earliestExpirationDate: string | null,
+  listDigest?: string | null,
 ) {
   return toMutationVariables(
-    planProductMetafieldWrites(productId, batchIds, earliestExpirationDate),
+    planProductMetafieldWrites(
+      productId,
+      batchIds,
+      earliestExpirationDate,
+      listDigest,
+    ),
   );
 }
 

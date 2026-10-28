@@ -120,7 +120,7 @@ describe("runFulfillmentJob", () => {
     ]);
 
     expect(
-      shopify.calls.filter((call) => call === "GetProductBatches"),
+      shopify.calls.filter((call) => call === "SaveProductFreshness"),
     ).toHaveLength(1);
     expect(shopify.batch(BATCH)?.quantity).toBe(3);
   });

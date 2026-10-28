@@ -15,7 +15,6 @@ import type { ProductQuantity } from "../shared/fulfillment";
 import {
   type FulfillmentPlanData,
   checkPlanBeforeRetry,
-  earliestDateAfterPlan,
   planFulfillment,
 } from "../shared/fulfillment-plan";
 
@@ -113,7 +112,7 @@ async function planAndApply(
     );
   }
 
-  await applyPlan(admin, productId, plan, plan.earliestExpirationDate);
+  await applyPlan(admin, productId, plan);
   await markApplied(key);
 }
 
@@ -148,12 +147,7 @@ async function finishPlan(
     await dropPlan(row, "changed_during_retry");
     return;
   }
-  await applyPlan(
-    admin,
-    row.productId,
-    plan,
-    earliestDateAfterPlan(plan, current),
-  );
+  await applyPlan(admin, row.productId, plan);
   await markApplied(row);
 }
 

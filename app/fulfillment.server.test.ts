@@ -42,6 +42,7 @@ const discrepancies = () =>
 
 beforeEach(async () => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "info").mockImplementation(() => {});
   await clearTestData();
 });
 afterEach(clearTestData);
@@ -62,6 +63,101 @@ describe("processFulfillment", () => {
     expect(
       await db.fulfillmentPlan.findFirst({ where: { shop } }),
     ).toMatchObject({ appliedAt: expect.any(Date) });
+  });
+
+  it("keeps a batch the panel adds while the fulfillment runs", async () => {
+    const { shopify, fulfill } = setup();
+    const PANEL = "gid://shopify/Metaobject/panel";
+    // The panel takes no lock, so its save can land mid-fulfillment
+    shopify.beforeNext("SaveProductFreshness", () =>
+      shopify.addBatch(productId, PANEL, {
+        quantity: 4,
+        expirationDate: "2026-10-30",
+      }),
+    );
+
+    await fulfill("gid://shopify/Fulfillment/1", 5);
+
+    expect(shopify.batch(SOON)).toBeUndefined();
+    expect(shopify.batch(LATER)?.quantity).toBe(8);
+    expect(shopify.product(productId)).toStrictEqual({
+      batchIds: [LATER, PANEL],
+      earliestExpirationDate: "2026-10-30",
+    });
+  });
+
+  it("finishes on retry with the panel's batch kept after a delete fails", async () => {
+    const { shopify, fulfill } = setup();
+    const PANEL = "gid://shopify/Metaobject/panel";
+    shopify.beforeNext("SaveProductFreshness", () =>
+      shopify.addBatch(productId, PANEL, {
+        quantity: 4,
+        expirationDate: "2026-10-30",
+      }),
+    );
+    shopify.failNext("DeleteBatch");
+    await expect(fulfill("gid://shopify/Fulfillment/1", 5)).rejects.toThrow(
+      "Simulated network failure in DeleteBatch",
+    );
+
+    await fulfill("gid://shopify/Fulfillment/1", 5);
+
+    expect(shopify.batch(SOON)).toBeUndefined();
+    expect(shopify.batch(LATER)?.quantity).toBe(8);
+    expect(shopify.product(productId)?.batchIds).toStrictEqual([LATER, PANEL]);
+    expect(await discrepancies()).toStrictEqual([]);
+  });
+
+  it("never deletes a batch that was restocked mid-fulfillment", async () => {
+    const { shopify, fulfill } = setup();
+    // The plan empties "soon"; the merchant restocks it after planning
+    shopify.beforeNext("SetBatchFields", () => shopify.setQuantity(SOON, 20));
+    await expect(fulfill("gid://shopify/Fulfillment/1", 5)).rejects.toThrow(
+      "batches changed mid-fulfillment",
+    );
+
+    // The job's retry sees the edit and drops the plan
+    await fulfill("gid://shopify/Fulfillment/1", 5);
+
+    expect(shopify.batch(SOON)?.quantity).toBe(20);
+    // Half-applied, as for any plan edited in between: the discrepancy flags it
+    expect(shopify.batch(LATER)?.quantity).toBe(8);
+    expect(shopify.product(productId)?.batchIds).toStrictEqual([SOON, LATER]);
+    expect(await discrepancies()).toStrictEqual([
+      {
+        fulfillmentId: "gid://shopify/Fulfillment/1",
+        reason: "changed_during_retry",
+        shortfall: null,
+      },
+    ]);
+  });
+
+  it("reapplies a decrement a panel save undid mid-fulfillment", async () => {
+    const { shopify, fulfill } = setup();
+    // A panel opened earlier changes LATER's date, resending its old quantity,
+    // after the fulfillment's quantity write and before its reread
+    shopify.beforeNext("SetBatchFields", () =>
+      shopify.beforeNext("GetProductBatches", () => {
+        shopify.setQuantity(LATER, 10);
+        shopify.batch(LATER)!.expirationDate = "2026-11-10";
+      }),
+    );
+    await expect(fulfill("gid://shopify/Fulfillment/1", 5)).rejects.toThrow(
+      "batches changed mid-fulfillment",
+    );
+
+    await fulfill("gid://shopify/Fulfillment/1", 5);
+
+    expect(shopify.batch(LATER)).toStrictEqual({
+      quantity: 8,
+      expirationDate: "2026-11-10",
+    });
+    expect(shopify.batch(SOON)).toBeUndefined();
+    expect(shopify.product(productId)).toStrictEqual({
+      batchIds: [LATER],
+      earliestExpirationDate: "2026-11-10",
+    });
+    expect(await discrepancies()).toStrictEqual([]);
   });
 
   it("does nothing more when the same fulfillment arrives again", async () => {

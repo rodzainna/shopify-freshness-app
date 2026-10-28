@@ -15,9 +15,6 @@ export interface StoredBatch extends Batch {
 export interface FulfillmentPlanData {
   updates: { id: string; before: number; after: number }[];
   deletes: { id: string; before: number }[];
-  beforeBatchIds: string[];
-  batchIds: string[];
-  earliestExpirationDate: string | null;
 }
 
 export interface StockShortfall {
@@ -27,8 +24,8 @@ export interface StockShortfall {
 }
 
 /**
- * Plans one product's share of a fulfillment: which batches to set, delete
- * and keep linked, and any units fresh stock couldn't cover.
+ * Plans one product's share of a fulfillment: which batches to set and delete,
+ * and any units fresh stock couldn't cover.
  *
  * @param today - the shop-local "today", "YYYY-MM-DD" (see getShopToday)
  */
@@ -39,7 +36,7 @@ export function planFulfillment(
 ): { plan: FulfillmentPlanData; shortfall: StockShortfall | null } {
   const unique = dedupeById(batches);
   const before = new Map(unique.map((batch) => [batch.id, batch.quantity]));
-  const { remaining, updated, emptied, shortfall } = decrementFefo(
+  const { updated, emptied, shortfall } = decrementFefo(
     unique,
     quantity,
     today,
@@ -52,9 +49,6 @@ export function planFulfillment(
       after,
     })),
     deletes: emptied.map(({ id }) => ({ id, before: before.get(id)! })),
-    beforeBatchIds: unique.map(({ id }) => id),
-    batchIds: remaining.map(({ id }) => id),
-    earliestExpirationDate: getEarliestExpirationDate(remaining),
   };
 
   if (shortfall === 0) return { plan, shortfall: null };
@@ -73,6 +67,44 @@ export function planFulfillment(
   };
 }
 
+/**
+ * The batch list and earliest date to write for a plan, given the product's
+ * batches as just re-read. Batches the plan doesn't delete are kept, so a
+ * batch another client added or removed meanwhile stays that way.
+ */
+export function freshnessAfterPlan(
+  plan: FulfillmentPlanData,
+  current: StoredBatch[],
+): { batchIds: string[]; earliestExpirationDate: string | null } {
+  const deleted = new Set(plan.deletes.map(({ id }) => id));
+  const kept = dedupeById(current).filter(({ id }) => !deleted.has(id));
+  return {
+    batchIds: kept.map(({ id }) => id),
+    earliestExpirationDate: getEarliestExpirationDate(kept),
+  };
+}
+
+/**
+ * Right after a plan's quantities are written, checks nobody changed them
+ * since: updated batches must be at "after", emptied ones untouched or gone.
+ */
+export function checkPlanApplied(
+  plan: FulfillmentPlanData,
+  current: StoredBatch[],
+): "safe" | "changed" {
+  const quantities = new Map(
+    dedupeById(current).map((batch) => [batch.id, batch.quantity]),
+  );
+  const updatesOk = plan.updates.every(
+    ({ id, after }) => quantities.get(id) === after,
+  );
+  const deletesOk = plan.deletes.every(({ id, before }) => {
+    const quantity = quantities.get(id);
+    return quantity === undefined || quantity === before;
+  });
+  return updatesOk && deletesOk ? "safe" : "changed";
+}
+
 // First occurrence wins, keeping the list's order.
 function dedupeById(batches: StoredBatch[]): StoredBatch[] {
   const seen = new Set<string>();
@@ -84,9 +116,8 @@ function dedupeById(batches: StoredBatch[]): StoredBatch[] {
 }
 
 /**
- * Before re-applying a saved plan, checks that each batch it touches is at
- * its "before" or "after" value. Anything else means someone edited it in
- * between, and re-applying would overwrite that edit.
+ * Before re-applying a saved plan, checks each batch it touches is still at
+ * "before" or "after"; others may change, as freshnessAfterPlan keeps them.
  *
  * @param current - the product's batches as just re-read from Shopify
  */
@@ -95,14 +126,6 @@ export function checkPlanBeforeRetry(
   current: StoredBatch[],
 ): "safe" | "changed" {
   const unique = dedupeById(current);
-  const listIds = unique.map(({ id }) => id);
-  if (
-    !sameIds(listIds, plan.beforeBatchIds) &&
-    !sameIds(listIds, plan.batchIds)
-  ) {
-    return "changed";
-  }
-
   const quantities = new Map(unique.map((batch) => [batch.id, batch.quantity]));
   const updatesOk = plan.updates.every(({ id, before, after }) => {
     const quantity = quantities.get(id);
@@ -114,24 +137,4 @@ export function checkPlanBeforeRetry(
     return quantity === undefined || quantity === before;
   });
   return updatesOk && deletesOk ? "safe" : "changed";
-}
-
-/**
- * The earliest date once the plan is applied to the batches as they are now.
- * On a retry this includes edits the plan's saved date can't know about.
- *
- * @param current - the product's batches as just re-read from Shopify
- */
-export function earliestDateAfterPlan(
-  plan: FulfillmentPlanData,
-  current: StoredBatch[],
-): string | null {
-  // Decremented batches stay in stock, so their new quantities can't change it
-  const byId = new Map(current.map((batch) => [batch.id, batch]));
-  const remaining = plan.batchIds.flatMap((id) => byId.get(id) ?? []);
-  return getEarliestExpirationDate(remaining);
-}
-
-function sameIds(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((id, index) => id === b[index]);
 }
