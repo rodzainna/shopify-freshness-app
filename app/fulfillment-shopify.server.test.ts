@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import {
   BatchListChangedError,
+  BatchesChangedError,
   PermanentShopifyError,
   applyPlan,
   deleteBatches,
@@ -15,6 +16,8 @@ import type { FulfillmentPlanData } from "../shared/fulfillment-plan";
 import { fakeShopify, listDigest } from "../test/fake-shopify";
 
 const productId = "gid://shopify/Product/1";
+
+afterEach(() => vi.restoreAllMocks());
 
 type Call = { operation: string; variables: Record<string, unknown> };
 
@@ -38,21 +41,52 @@ function fakeAdmin(responses: Record<string, (variables: never) => unknown>) {
 }
 
 const noUserErrors = { userErrors: [] };
+
+const batchNode = (id: number, quantity: number, date: string) => ({
+  id: `gid://shopify/Metaobject/${id}`,
+  quantity: { value: String(quantity) },
+  expirationDate: { value: date },
+});
+const listResponse = (nodes: unknown[]) => ({
+  product: {
+    freshnessBatches: {
+      compareDigest: "digest-1",
+      references: { nodes, pageInfo: { hasNextPage: false } },
+    },
+  },
+});
+const plan: FulfillmentPlanData = {
+  updates: [{ id: "gid://shopify/Metaobject/2", before: 10, after: 8 }],
+  deletes: [{ id: "gid://shopify/Metaobject/1", before: 3 }],
+};
+
+// A plan's batches as applyPlan rereads them, after its quantity writes
+function listAfter({ updates, deletes }: FulfillmentPlanData) {
+  return listResponse(
+    [
+      ...deletes.map(({ id, before }) => ({ id, quantity: before })),
+      ...updates.map(({ id, after }) => ({ id, quantity: after })),
+    ].map(({ id, quantity }) => ({
+      id,
+      quantity: { value: String(quantity) },
+      expirationDate: { value: "2026-11-05" },
+    })),
+  );
+}
+
 const writesSucceed = {
+  GetProductBatches: () =>
+    listResponse([
+      batchNode(1, 3, "2026-10-22"),
+      batchNode(2, 8, "2026-11-05"),
+    ]),
   SetBatchFields: () => ({ metaobjectUpdate: noUserErrors }),
+  SaveBatchList: () => ({ metafieldsSet: noUserErrors }),
   SaveProductFreshness: () => ({
     metafieldsSet: noUserErrors,
     metafieldsDelete: null,
   }),
   DeleteBatch: () => ({ metaobjectDelete: noUserErrors }),
-};
-
-const plan: FulfillmentPlanData = {
-  updates: [{ id: "gid://shopify/Metaobject/2", before: 10, after: 8 }],
-  deletes: [{ id: "gid://shopify/Metaobject/1", before: 3 }],
-  beforeBatchIds: ["gid://shopify/Metaobject/1", "gid://shopify/Metaobject/2"],
-  batchIds: ["gid://shopify/Metaobject/2"],
-  earliestExpirationDate: "2026-11-05",
 };
 
 describe("readShopToday", () => {
@@ -215,10 +249,10 @@ describe("readProductBatches", () => {
 });
 
 describe("applyPlan", () => {
-  it("sets quantities, then the list and date, then deletes", async () => {
+  it("sets quantities, then the list and date together, then deletes", async () => {
     const { admin, calls } = fakeAdmin(writesSucceed);
 
-    await applyPlan(admin, productId, plan, "2026-11-05");
+    await applyPlan(admin, productId, plan);
 
     expect(calls).toStrictEqual([
       {
@@ -228,6 +262,7 @@ describe("applyPlan", () => {
           metaobject: { fields: [{ key: "quantity", value: "8" }] },
         },
       },
+      { operation: "GetProductBatches", variables: expect.anything() },
       {
         operation: "SaveProductFreshness",
         variables: expect.objectContaining({
@@ -236,6 +271,7 @@ describe("applyPlan", () => {
               ownerId: productId,
               key: "freshness_batches",
               value: JSON.stringify(["gid://shopify/Metaobject/2"]),
+              compareDigest: "digest-1",
             },
             {
               ownerId: productId,
@@ -243,6 +279,7 @@ describe("applyPlan", () => {
               value: "2026-11-05",
             },
           ],
+          delete: [],
         }),
       },
       {
@@ -252,10 +289,8 @@ describe("applyPlan", () => {
     ]);
   });
 
-  it("writes every quantity before the list, and the list before deletes", async () => {
-    const { admin, calls } = fakeAdmin(writesSucceed);
+  it("writes every quantity, then the list and date, then every delete", async () => {
     const wider: FulfillmentPlanData = {
-      ...plan,
       updates: [
         { id: "gid://shopify/Metaobject/2", before: 10, after: 8 },
         { id: "gid://shopify/Metaobject/3", before: 4, after: 1 },
@@ -265,12 +300,17 @@ describe("applyPlan", () => {
         { id: "gid://shopify/Metaobject/4", before: 2 },
       ],
     };
+    const { admin, calls } = fakeAdmin({
+      ...writesSucceed,
+      GetProductBatches: () => listAfter(wider),
+    });
 
-    await applyPlan(admin, productId, wider, null);
+    await applyPlan(admin, productId, wider);
 
     expect(calls.map(({ operation }) => operation)).toStrictEqual([
       "SetBatchFields",
       "SetBatchFields",
+      "GetProductBatches",
       "SaveProductFreshness",
       "DeleteBatch",
       "DeleteBatch",
@@ -278,7 +318,7 @@ describe("applyPlan", () => {
   });
 
   // Each write takes a few ms, so overlapping writes are counted as in flight
-  function slowAdmin(failIds: string[] = []) {
+  function slowAdmin(forPlan: FulfillmentPlanData, failIds: string[] = []) {
     const state = { inFlight: 0, mostInFlight: 0, finished: 0 };
     const admin = {
       graphql: async (
@@ -299,7 +339,9 @@ describe("applyPlan", () => {
           : [];
         const data = query.includes("SetBatchFields")
           ? { metaobjectUpdate: { userErrors } }
-          : { metafieldsSet: noUserErrors };
+          : query.includes("GetProductBatches")
+            ? listAfter(forPlan)
+            : { metafieldsSet: noUserErrors };
         return Response.json({ data });
       },
     } as unknown as AdminApiContext;
@@ -307,7 +349,6 @@ describe("applyPlan", () => {
   }
 
   const updatesFor = (count: number): FulfillmentPlanData => ({
-    ...plan,
     updates: Array.from({ length: count }, (_, index) => ({
       id: `gid://shopify/Metaobject/${index + 10}`,
       before: 5,
@@ -317,21 +358,23 @@ describe("applyPlan", () => {
   });
 
   it("sends a step's writes together, not one after another", async () => {
-    const { admin, state } = slowAdmin();
+    const twoUpdates = updatesFor(2);
+    const { admin, state } = slowAdmin(twoUpdates);
 
-    await applyPlan(admin, productId, updatesFor(2), null);
+    await applyPlan(admin, productId, twoUpdates);
 
     expect(state.mostInFlight).toBe(2);
   });
 
   it("keeps at most 10 writes in flight", async () => {
-    const { admin, state } = slowAdmin();
+    const manyUpdates = updatesFor(25);
+    const { admin, state } = slowAdmin(manyUpdates);
 
-    await applyPlan(admin, productId, updatesFor(25), null);
+    await applyPlan(admin, productId, manyUpdates);
 
     expect(state.mostInFlight).toBe(10);
-    // 25 quantity writes, then the list write
-    expect(state.finished).toBe(26);
+    // 25 quantity writes, the reread, then the list and date
+    expect(state.finished).toBe(27);
   });
 
   it("waits for every write and reports every failure", async () => {
@@ -339,11 +382,10 @@ describe("applyPlan", () => {
       "gid://shopify/Metaobject/10",
       "gid://shopify/Metaobject/12",
     ];
-    const { admin, state } = slowAdmin(failIds);
+    const threeUpdates = updatesFor(3);
+    const { admin, state } = slowAdmin(threeUpdates, failIds);
 
-    await expect(
-      applyPlan(admin, productId, updatesFor(3), null),
-    ).rejects.toThrow(
+    await expect(applyPlan(admin, productId, threeUpdates)).rejects.toThrow(
       "Setting batch gid://shopify/Metaobject/10 quantity failed: Rejected gid://shopify/Metaobject/10; " +
         "Setting batch gid://shopify/Metaobject/12 quantity failed: Rejected gid://shopify/Metaobject/12",
     );
@@ -371,26 +413,148 @@ describe("applyPlan", () => {
       ],
     };
 
-    await expect(applyPlan(admin, productId, twoUpdates, null)).rejects.toThrow(
+    await expect(applyPlan(admin, productId, twoUpdates)).rejects.toThrow(
       "Setting batch gid://shopify/Metaobject/3 quantity failed: Invalid value",
     );
     expect(calls.map(({ operation }) => operation)).not.toContain(
-      "SaveProductFreshness",
+      "SaveBatchList",
     );
   });
 
-  it("writes the date it's given, not the plan's", async () => {
-    const { admin, calls } = fakeAdmin(writesSucceed);
+  it("writes the list and date from the batches it rereads", async () => {
+    const { admin, calls } = fakeAdmin({
+      ...writesSucceed,
+      // Another client added batch 3 after the plan was made
+      GetProductBatches: () =>
+        listResponse([
+          batchNode(1, 3, "2026-10-22"),
+          batchNode(2, 8, "2026-11-05"),
+          batchNode(3, 4, "2026-10-30"),
+        ]),
+    });
 
-    await applyPlan(admin, productId, plan, null);
+    await applyPlan(admin, productId, plan);
 
-    expect(calls[1].variables).toMatchObject({
-      delete: [
+    expect(calls[2].variables).toMatchObject({
+      set: [
         {
-          ownerId: productId,
-          namespace: "$app",
-          key: "earliest_expiration_date",
+          key: "freshness_batches",
+          value: JSON.stringify([
+            "gid://shopify/Metaobject/2",
+            "gid://shopify/Metaobject/3",
+          ]),
         },
+        { key: "earliest_expiration_date", value: "2026-10-30" },
+      ],
+    });
+  });
+
+  it("stops without writing the list when a batch it touches changed", async () => {
+    const { admin, calls } = fakeAdmin({
+      ...writesSucceed,
+      // The batch it empties was restocked meanwhile
+      GetProductBatches: () =>
+        listResponse([
+          batchNode(1, 20, "2026-10-22"),
+          batchNode(2, 8, "2026-11-05"),
+        ]),
+    });
+
+    const error = await applyPlan(admin, productId, plan).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(BatchesChangedError);
+    expect(error).not.toBeInstanceOf(PermanentShopifyError);
+    expect(calls.map(({ operation }) => operation)).toStrictEqual([
+      "SetBatchFields",
+      "GetProductBatches",
+    ]);
+  });
+
+  const stale = {
+    metafieldsSet: {
+      userErrors: [{ message: "Modified", code: "STALE_OBJECT" }],
+    },
+    metafieldsDelete: null,
+  };
+
+  it("rereads and writes again when the list changed meanwhile", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    let saves = 0;
+    const { admin, calls } = fakeAdmin({
+      ...writesSucceed,
+      SaveProductFreshness: () =>
+        ++saves === 1 ? stale : writesSucceed.SaveProductFreshness(),
+    });
+
+    await applyPlan(admin, productId, plan);
+
+    expect(calls.map(({ operation }) => operation)).toStrictEqual([
+      "SetBatchFields",
+      "GetProductBatches",
+      "SaveProductFreshness",
+      "GetProductBatches",
+      "SaveProductFreshness",
+      "DeleteBatch",
+    ]);
+  });
+
+  it("leaves it to the job's retries after three changed lists", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { admin, calls } = fakeAdmin({
+      ...writesSucceed,
+      SaveProductFreshness: () => stale,
+    });
+
+    const error = await applyPlan(admin, productId, plan).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(BatchListChangedError);
+    expect(error).not.toBeInstanceOf(PermanentShopifyError);
+    const operations = calls.map(({ operation }) => operation);
+    expect(
+      operations.filter((name) => name === "SaveProductFreshness"),
+    ).toHaveLength(3);
+    expect(operations).not.toContain("DeleteBatch");
+  });
+
+  it("fails for good when the product is gone on reread", async () => {
+    const { admin } = fakeAdmin({
+      ...writesSucceed,
+      GetProductBatches: () => ({ product: null }),
+    });
+
+    await expect(applyPlan(admin, productId, plan)).rejects.toThrow(
+      new PermanentShopifyError(
+        `Rereading product ${productId} failed: product_not_found`,
+      ),
+    );
+  });
+
+  it("deletes the list, unchecked, when it empties every batch", async () => {
+    const emptiesAll: FulfillmentPlanData = {
+      updates: [],
+      deletes: [{ id: "gid://shopify/Metaobject/1", before: 3 }],
+    };
+    const { admin, calls } = fakeAdmin({
+      ...writesSucceed,
+      GetProductBatches: () => listAfter(emptiesAll),
+    });
+
+    await applyPlan(admin, productId, emptiesAll);
+
+    expect(calls.map(({ operation }) => operation)).toStrictEqual([
+      "GetProductBatches",
+      "SaveProductFreshness",
+      "DeleteBatch",
+    ]);
+    expect(calls[1].variables).toMatchObject({
+      set: [],
+      delete: [
+        { key: "freshness_batches" },
+        { key: "earliest_expiration_date" },
       ],
     });
   });
@@ -407,13 +571,13 @@ describe("applyPlan", () => {
       }),
     });
 
-    await expect(applyPlan(admin, productId, plan, null)).rejects.toThrow(
+    await expect(applyPlan(admin, productId, plan)).rejects.toThrow(
       "Setting batch gid://shopify/Metaobject/2 quantity failed: Record not found",
     );
     expect(calls).toHaveLength(1);
   });
 
-  it("throws when the list or date write is rejected", async () => {
+  it("throws when the list and date write is rejected", async () => {
     const { admin } = fakeAdmin({
       ...writesSucceed,
       SaveProductFreshness: () => ({
@@ -421,10 +585,54 @@ describe("applyPlan", () => {
       }),
     });
 
-    await expect(applyPlan(admin, productId, plan, null)).rejects.toThrow(
+    await expect(applyPlan(admin, productId, plan)).rejects.toThrow(
       new PermanentShopifyError(
         `Saving product ${productId} freshness failed: Invalid value`,
       ),
+    );
+  });
+
+  // Batch 2 is left, but it has no readable date
+  const undatedList = () =>
+    listResponse([batchNode(1, 3, "2026-10-22"), batchNode(2, 8, "")]);
+
+  it("clears the date right after the list when no batch left has one", async () => {
+    const { admin, calls } = fakeAdmin({
+      ...writesSucceed,
+      GetProductBatches: undatedList,
+    });
+
+    await applyPlan(admin, productId, plan);
+
+    expect(calls.map(({ operation }) => operation)).toStrictEqual([
+      "SetBatchFields",
+      "GetProductBatches",
+      "SaveBatchList",
+      "SaveProductFreshness",
+      "DeleteBatch",
+    ]);
+    expect(calls[2].variables).toMatchObject({ compareDigest: "digest-1" });
+    expect(calls[3].variables).toMatchObject({
+      set: [],
+      delete: [{ key: "earliest_expiration_date" }],
+    });
+  });
+
+  it("stops before the deletes when the date clear is rejected", async () => {
+    const { admin, calls } = fakeAdmin({
+      ...writesSucceed,
+      GetProductBatches: undatedList,
+      SaveProductFreshness: () => ({
+        metafieldsSet: null,
+        metafieldsDelete: { userErrors: [{ message: "Invalid value" }] },
+      }),
+    });
+
+    await expect(applyPlan(admin, productId, plan)).rejects.toThrow(
+      PermanentShopifyError,
+    );
+    expect(calls.map(({ operation }) => operation)).not.toContain(
+      "DeleteBatch",
     );
   });
 
@@ -446,7 +654,7 @@ describe("applyPlan", () => {
       ],
     };
 
-    const error = await applyPlan(admin, productId, twoUpdates, null).catch(
+    const error = await applyPlan(admin, productId, twoUpdates).catch(
       (caught: unknown) => caught,
     );
 
@@ -466,9 +674,7 @@ describe("applyPlan", () => {
       }),
     });
 
-    await expect(
-      applyPlan(admin, productId, plan, null),
-    ).resolves.toBeUndefined();
+    await expect(applyPlan(admin, productId, plan)).resolves.toBeUndefined();
   });
 
   it("throws on any other delete error", async () => {
@@ -481,7 +687,7 @@ describe("applyPlan", () => {
       }),
     });
 
-    await expect(applyPlan(admin, productId, plan, null)).rejects.toThrow(
+    await expect(applyPlan(admin, productId, plan)).rejects.toThrow(
       "Deleting batch gid://shopify/Metaobject/1 failed: Not authorized",
     );
   });

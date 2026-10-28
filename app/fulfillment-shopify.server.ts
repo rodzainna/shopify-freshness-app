@@ -1,7 +1,9 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
-import type {
-  FulfillmentPlanData,
-  StoredBatch,
+import {
+  type FulfillmentPlanData,
+  type StoredBatch,
+  checkPlanApplied,
+  freshnessAfterPlan,
 } from "../shared/fulfillment-plan";
 import type { NewBatch } from "../shared/batch-edit";
 import { getShopToday } from "../shared/freshness";
@@ -33,6 +35,11 @@ export class PermanentShopifyError extends Error {
 // The batch list changed since it was read, so it wasn't overwritten
 export class BatchListChangedError extends Error {
   name = "BatchListChangedError";
+}
+
+// A batch a plan touches changed mid-apply; retryable, and the retry drops it
+export class BatchesChangedError extends Error {
+  name = "BatchesChangedError";
 }
 
 // admin.graphql throws on top-level GraphQL errors, so only userErrors
@@ -168,41 +175,106 @@ export async function readProductBatches(
   };
 }
 
+// The panel takes no lock, so its saves can keep changing the list
+const LIST_WRITE_ATTEMPTS = 3;
+
 /**
- * Writes a plan in the panel's order: quantities, then the list and date,
- * then deletes, so the list never points at a deleted batch. Every write
- * sets a final value, so re-running it after a partial failure is safe.
+ * Writes quantities, then the list and date, then deletes, so the list never
+ * points at a deleted batch. Each write sets a final value, so reruns are safe.
  */
 export async function applyPlan(
   admin: AdminApiContext,
   productId: string,
   plan: FulfillmentPlanData,
-  earliestExpirationDate: string | null,
 ): Promise<void> {
   await writeEach(plan.updates, ({ id, after }) =>
     setBatchQuantity(admin, id, after),
   );
-  await saveProductFreshness(
-    admin,
-    productId,
-    plan.batchIds,
-    earliestExpirationDate,
-  );
+  await saveListAfterPlan(admin, productId, plan);
   await writeEach(plan.deletes, ({ id }) => deleteBatch(admin, id));
 }
 
-/** Writes the batch list and earliest date, deleting either when empty. */
+// Rebuilds list and date from a fresh read, so batches added meanwhile stay
+async function saveListAfterPlan(
+  admin: AdminApiContext,
+  productId: string,
+  plan: FulfillmentPlanData,
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    const { batches, listDigest } = await rereadBatches(admin, productId);
+    // e.g. a batch it empties was restocked, or a panel save undid a decrement
+    if (checkPlanApplied(plan, batches) === "changed") {
+      throw new BatchesChangedError(
+        `Product ${productId}'s batches changed mid-fulfillment`,
+      );
+    }
+    const { batchIds, earliestExpirationDate: date } = freshnessAfterPlan(
+      plan,
+      batches,
+    );
+    try {
+      if (batchIds.length === 0) {
+        // Shopify's metafieldsDelete has no stale check, so this is unguarded
+        await saveProductFreshness(admin, productId, [], null);
+        return;
+      }
+      if (date === null) {
+        // A delete can't join the guarded set, so the clear follows the list
+        await saveBatchList(admin, productId, batchIds, listDigest);
+        await saveEarliestExpirationDate(admin, productId, null);
+        return;
+      }
+      // One atomic set: a stale list means neither is written
+      await saveProductFreshness(admin, productId, batchIds, date, listDigest);
+      return;
+    } catch (error) {
+      if (!(error instanceof BatchListChangedError)) throw error;
+      // Not permanent: the job's own retries try again later
+      if (attempt === LIST_WRITE_ATTEMPTS) throw error;
+      console.info(
+        `${productId}'s batch list changed mid-fulfillment, retrying`,
+      );
+    }
+  }
+}
+
+async function rereadBatches(
+  admin: AdminApiContext,
+  productId: string,
+): Promise<{ batches: StoredBatch[]; listDigest: string | null }> {
+  const read = await readProductBatches(admin, productId);
+  if ("problem" in read) {
+    throw new PermanentShopifyError(
+      `Rereading product ${productId} failed: ${read.problem}`,
+    );
+  }
+  if ("notTracked" in read) return { batches: [], listDigest: null };
+  return { batches: read.batches, listDigest: read.listDigest };
+}
+
+/**
+ * Writes the batch list and earliest date, deleting either when empty.
+ *
+ * @throws BatchListChangedError if `listDigest` is given and the list changed
+ */
 export async function saveProductFreshness(
   admin: AdminApiContext,
   productId: string,
   batchIds: string[],
   earliestExpirationDate: string | null,
+  listDigest?: string | null,
 ): Promise<void> {
   const freshness = await query<SaveProductFreshnessData>(
     admin,
     SAVE_PRODUCT_FRESHNESS_MUTATION,
-    saveProductFreshnessVariables(productId, batchIds, earliestExpirationDate),
+    saveProductFreshnessVariables(
+      productId,
+      batchIds,
+      earliestExpirationDate,
+      listDigest,
+    ),
   );
+  throwIfListStale(productId, freshness.metafieldsSet?.userErrors ?? []);
   throwOnUserErrors(
     `Saving product ${productId} freshness`,
     freshness.metafieldsSet?.userErrors,
@@ -345,11 +417,7 @@ export async function saveBatchList(
     saveBatchListVariables(productId, batchIds, compareDigest),
   );
   const errors = data.metafieldsSet?.userErrors ?? [];
-  if (errors.some(({ code }) => code === "STALE_OBJECT")) {
-    throw new BatchListChangedError(
-      `Product ${productId}'s batch list changed since it was read`,
-    );
-  }
+  throwIfListStale(productId, errors);
   throwOnUserErrors(`Saving product ${productId} batch list`, errors);
 }
 
@@ -464,6 +532,17 @@ async function deleteBatch(admin: AdminApiContext, id: string): Promise<void> {
     (error) => error.code !== "RECORD_NOT_FOUND",
   );
   throwOnUserErrors(`Deleting batch ${id}`, errors);
+}
+
+function throwIfListStale(
+  productId: string,
+  errors: UserErrorsPayload["userErrors"],
+): void {
+  if (errors.some(({ code }) => code === "STALE_OBJECT")) {
+    throw new BatchListChangedError(
+      `Product ${productId}'s batch list changed since it was read`,
+    );
+  }
 }
 
 function throwOnUserErrors(

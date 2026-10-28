@@ -44,6 +44,8 @@ export function fakeShopify({ delayMs = 0 } = {}) {
   const lostResponses = new Map<string, number>();
   // Operation name → how many more calls Shopify should reject
   const rejections = new Map<string, number>();
+  // Operation name → a change another client makes just before that call lands
+  const beforeHooks = new Map<string, () => void>();
   const payloadField: Record<string, string> = {
     SetBatchFields: "metaobjectUpdate",
     SaveProductFreshness: "metafieldsSet",
@@ -133,9 +135,16 @@ export function fakeShopify({ delayMs = 0 } = {}) {
         ownerId: string;
         key: string;
         value: string;
+        compareDigest?: string | null;
       }[];
       const remove = variables.delete as { ownerId: string; key: string }[];
-      for (const { ownerId, key, value } of set) {
+      // metafieldsSet is atomic, so one stale digest blocks every set
+      const isStale = set.some(({ ownerId, compareDigest }) => {
+        if (compareDigest === undefined) return false;
+        const { batchIds } = products.get(ownerId)!;
+        return compareDigest !== (batchIds ? listDigest(batchIds) : null);
+      });
+      for (const { ownerId, key, value } of isStale ? [] : set) {
         const product = products.get(ownerId)!;
         if (key === "freshness_batches") product.batchIds = JSON.parse(value);
         else product.earliestExpirationDate = value;
@@ -145,7 +154,14 @@ export function fakeShopify({ delayMs = 0 } = {}) {
         if (key === "freshness_batches") product.batchIds = null;
         else product.earliestExpirationDate = null;
       }
-      return { metafieldsSet: ok, metafieldsDelete: ok };
+      const setResult = isStale
+        ? userError(
+            "The metafield has been modified since it was loaded.",
+            "STALE_OBJECT",
+          )
+        : ok;
+      // metafieldsDelete is a separate field, so it runs either way
+      return { metafieldsSet: setResult, metafieldsDelete: ok };
     },
     FindBatchByHandle: ({ handle }) => {
       const id = handles.get(handle as string);
@@ -220,6 +236,11 @@ export function fakeShopify({ delayMs = 0 } = {}) {
           },
         });
       }
+      const hook = beforeHooks.get(operation);
+      if (hook) {
+        beforeHooks.delete(operation);
+        hook();
+      }
       const data = answer[operation](options?.variables ?? {});
       // The write landed, but the response never arrived
       const lostLeft = lostResponses.get(operation) ?? 0;
@@ -256,6 +277,15 @@ export function fakeShopify({ delayMs = 0 } = {}) {
     },
     loseResponseNext(operation: string, times = 1) {
       lostResponses.set(operation, times);
+    },
+    beforeNext(operation: string, change: () => void) {
+      beforeHooks.set(operation, change);
+    },
+    // Adds a batch to a product's list, as the product panel does
+    addBatch(productId: string, id: string, batch: FakeBatch) {
+      batches.set(id, { ...batch });
+      const product = products.get(productId)!;
+      product.batchIds = [...(product.batchIds ?? []), id];
     },
     product: (productId: string) => products.get(productId),
     batch: (id: string) => batches.get(id),
