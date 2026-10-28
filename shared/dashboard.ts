@@ -8,7 +8,7 @@ import {
 import { type ProductInventory, compareStock } from "./inventory";
 import { type BatchNode, isReadableBatch } from "./product-metafields";
 
-// The dashboard query's product shape (see app/routes/app._index.tsx)
+// The dashboard query's product shape (see app/dashboard.server.ts)
 export interface DashboardProductNode extends ProductInventory {
   id: string;
   // The numeric id admin URLs take

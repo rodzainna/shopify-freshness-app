@@ -139,6 +139,7 @@ app/
   routes/        dashboard, batch editor endpoint, privacy page, auth, webhook handlers, dev-only reseed page
   dev/           demo data, reseed logic, and the guard that makes the dev routes 404 outside development
   batch-edit.server.ts           load and save the dashboard editor's batches
+  dashboard.server.ts            load the dashboard page for the current filters and sort
   fulfillment-jobs.server.ts     save, run, retry and sweep fulfillment jobs
   fulfillment.server.ts          apply a fulfillment to each product's batches
   fulfillment-shopify.server.ts  read and write batches through the Admin API
