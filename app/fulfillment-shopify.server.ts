@@ -47,7 +47,7 @@ export class BatchesChangedError extends Error {
 
 // admin.graphql throws on top-level GraphQL errors, so only userErrors
 // need checking here.
-async function query<T>(
+export async function query<T>(
   admin: AdminApiContext,
   operation: string,
   variables?: Record<string, unknown>,
