@@ -3,7 +3,12 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { type ProductView, resolveProductView } from "./dashboard.server";
 import { query } from "./fulfillment-shopify.server";
 import type { ExportProduct } from "../shared/csv-export";
-import type { DashboardFilters } from "../shared/dashboard-filters";
+import { earliestDateOf } from "../shared/dashboard";
+import {
+  type DashboardFilters,
+  isAppSort,
+  sortByExpiry,
+} from "../shared/dashboard-filters";
 import { getShopToday } from "../shared/freshness";
 import { type BatchNode, MAX_BATCHES } from "../shared/product-metafields";
 
@@ -27,6 +32,7 @@ interface BatchList {
 
 interface ExportNode extends Omit<ExportProduct, "freshnessBatches"> {
   id: string;
+  earliestExpiration: { value: string } | null;
   freshnessBatches: BatchList | null;
 }
 
@@ -53,7 +59,7 @@ export type ExportData =
   | { kind: "ready"; products: ExportProduct[]; today: string }
   | { kind: "tooMany" };
 
-/** Every product the dashboard's Shopify search matches, with all its batches. */
+/** Every product the dashboard's search matches, in its order, with all its batches. */
 export async function loadExportProducts(
   admin: AdminApiContext,
   filters: DashboardFilters,
@@ -80,16 +86,25 @@ export async function loadExportProducts(
     }
   }
 
-  const complete: ExportProduct[] = [];
+  const complete: ExportNode[] = [];
   // One at a time: few products pass 250 batches, and each read is small
   for (const product of products) {
     complete.push(await withEveryBatch(admin, product));
   }
   return {
     kind: "ready",
-    products: complete,
+    products: isAppSort(filters.sort) ? byEarliestExpiry(complete) : complete,
     today: presetToday ?? getShopToday(timezone, now),
   };
+}
+
+// Shopify can't sort by a metafield, so the expiry sort happens here
+function byEarliestExpiry(products: ExportNode[]): ExportNode[] {
+  const dated = products.map((product) => ({
+    product,
+    earliestExpirationDate: earliestDateOf(product),
+  }));
+  return sortByExpiry(dated).map(({ product }) => product);
 }
 
 // Reads the batches past the first page, so the file can't leave one out
@@ -186,6 +201,9 @@ function fetchExportPage(
             productType
             tracksInventory
             totalInventory
+            earliestExpiration: metafield(key: "earliest_expiration_date") {
+              value
+            }
             freshnessBatches: metafield(key: "freshness_batches") {
               compareDigest
               references(first: $batchLimit) {

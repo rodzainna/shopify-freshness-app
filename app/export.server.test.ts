@@ -17,7 +17,11 @@ const batch = (n: number) => ({
   expirationDate: { value: "2026-11-01" },
 });
 
-const product = (n: number, batchCount = 1) => ({
+const product = (
+  n: number,
+  batchCount = 1,
+  earliestExpirationDate: string | null = null,
+) => ({
   id: `gid://shopify/Product/${n}`,
   legacyResourceId: String(n),
   title: `Product ${n}`,
@@ -25,6 +29,8 @@ const product = (n: number, batchCount = 1) => ({
   productType: "Type",
   tracksInventory: true,
   totalInventory: batchCount,
+  earliestExpiration:
+    earliestExpirationDate === null ? null : { value: earliestExpirationDate },
   batches: Array.from({ length: batchCount }, (_, i) => batch(n * 1000 + i)),
 });
 
@@ -208,6 +214,37 @@ describe("loadExportProducts", () => {
       sortKey: "VENDOR",
       reverse: true,
     });
+  });
+
+  it("sorts by earliest expiry, soonest first, for the expiry sort", async () => {
+    const { admin, graphql } = fakeShop([
+      product(1, 1, "2026-12-01"),
+      product(2, 1, null),
+      product(3, 1, "2026-11-01"),
+    ]);
+
+    const result = await loadExportProducts(admin, filters("sort=expiry"), NOW);
+
+    expect(
+      result.kind === "ready" && result.products.map(({ title }) => title),
+    ).toStrictEqual(["Product 3", "Product 1", "Product 2"]);
+    // Only dated products, as on the dashboard
+    expect(graphql.mock.calls[0][1]?.variables?.query).toContain(
+      "earliest_expiration_date",
+    );
+  });
+
+  it("keeps Shopify's order for its own sorts", async () => {
+    const { admin } = fakeShop([
+      product(1, 1, "2026-12-01"),
+      product(2, 1, "2026-11-01"),
+    ]);
+
+    const result = await loadExportProducts(admin, filters(), NOW);
+
+    expect(
+      result.kind === "ready" && result.products.map(({ title }) => title),
+    ).toStrictEqual(["Product 1", "Product 2"]);
   });
 
   it("reads every batch of a product with more than 250", async () => {
