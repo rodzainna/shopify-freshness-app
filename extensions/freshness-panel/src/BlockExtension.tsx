@@ -190,9 +190,8 @@ function Extension({
     try {
       const plan = planPanelSave(saved, batches);
 
-      // Created by handle, so a retry reuses them instead of duplicating. Rows
-      // that saved keep their id even if another failed, so removing one
-      // later still deletes it.
+      // Created by handle, so a retry reuses them. Rows that saved keep their
+      // id even if another failed, so removing one later still deletes it.
       const creates = await Promise.allSettled(plan.creates.map(saveBatch));
       const created = applySavedIds(plan.creates, creates);
       const idByHandle = new Map(
@@ -400,11 +399,8 @@ function Extension({
                 );
                 const errors = showErrors ? validateBatch(batch) : {};
 
-                // One grid per row: mounting several keyed Fragments into a
-                // shared grid at once interleaved their cells. The fixed
-                // column template keeps every row's columns aligned.
-                // Keyed by handle, which survives a save; id changes to the
-                // Shopify GID on first save and would remount the row.
+                // One grid per row: keyed Fragments in a shared grid interleaved
+                // their cells. Keyed by handle, since the id changes on first save.
                 return (
                   <s-grid
                     key={batch.handle}
