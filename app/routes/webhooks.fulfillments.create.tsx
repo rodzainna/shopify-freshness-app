@@ -22,13 +22,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await authenticateWebhookSafely(request);
 
   if (await isDuplicateWebhook(webhookId)) {
-    console.log(
+    console.info(
       `Duplicate ${topic} webhook ${webhookId} for ${shop}, skipping`,
     );
     return new Response();
   }
 
-  console.log(`Received ${topic} webhook ${webhookId} for ${shop}`);
+  console.info(`Received ${topic} webhook ${webhookId} for ${shop}`);
 
   const fulfillmentId = toFulfillmentGid(payload);
   // No session means the app was uninstalled, so there's nothing to update

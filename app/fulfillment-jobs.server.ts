@@ -92,7 +92,7 @@ export async function runFulfillmentJob(
 
   // Only while this run still holds the job; an uninstall may also have deleted it
   await db.fulfillmentJob.deleteMany({ where: heldBy(job) });
-  console.log(
+  console.info(
     `Applied ${job.fulfillmentId} for ${job.shop} in ${Date.now() - started}ms (attempt ${job.attempts})`,
   );
 }

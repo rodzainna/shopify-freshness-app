@@ -50,7 +50,7 @@ const job = () =>
 const clearTestData = () => clearShopData([shop]);
 
 beforeEach(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "info").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   await clearTestData();

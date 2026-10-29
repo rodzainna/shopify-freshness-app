@@ -10,13 +10,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, webhookId } = await authenticateWebhookSafely(request);
 
   if (await isDuplicateWebhook(webhookId)) {
-    console.log(
+    console.info(
       `Duplicate ${topic} webhook ${webhookId} for ${shop}, skipping`,
     );
     return new Response();
   }
 
-  console.log(`Received ${topic} webhook for ${shop}`);
+  console.info(`Received ${topic} webhook for ${shop}`);
 
   // Discrepancies are kept until shop/redact, so a quick reinstall keeps them.
   // Marked in the same transaction, so a retry after a reinstall can't delete the new session.

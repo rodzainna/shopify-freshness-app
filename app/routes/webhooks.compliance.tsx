@@ -6,7 +6,7 @@ import { authenticateWebhookSafely } from "../webhooks.server";
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic } = await authenticateWebhookSafely(request);
 
-  console.log(`Received ${topic} webhook for ${shop}`);
+  console.info(`Received ${topic} webhook for ${shop}`);
 
   if (topic === "SHOP_REDACT") {
     const where = { shop };
