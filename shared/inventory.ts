@@ -1,4 +1,5 @@
 import type { Batch } from "./freshness";
+import { plural } from "./plural";
 import { validateBatch } from "./validation";
 
 export interface ProductInventory {
@@ -98,12 +99,9 @@ export function formatInventoryMismatch({
   if (inStock === 0) {
     return `Batches total ${batchTotal}, but none are in stock.`;
   }
-  const verb = inStock === 1 ? "is" : "are";
-  return `Batches total ${batchTotal}, but only ${inStock} ${verb} in stock.`;
+  return `Batches total ${batchTotal}, but only ${inStock} ${plural(inStock, "is", "are")} in stock.`;
 }
 
 export function formatUnbatchedStock(units: number): string {
-  return units === 1
-    ? "1 unit in stock isn't in a batch yet."
-    : `${units} units in stock aren't in a batch yet.`;
+  return `${units} ${plural(units, "unit in stock isn't", "units in stock aren't")} in a batch yet.`;
 }

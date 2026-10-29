@@ -13,6 +13,7 @@ import { isShopifySignIn } from "../shopify-response";
 import type { NewBatch } from "../../shared/batch-edit";
 import type { ProductInventory } from "../../shared/inventory";
 import { getEarliestExpirationDate } from "../../shared/freshness";
+import { plural } from "../../shared/plural";
 
 // The demo tools never run outside `shopify app dev`
 export function requireDevelopment() {
@@ -103,7 +104,9 @@ async function replaceBatches(
   if (notCreated.length > 0) {
     console.error(`Creating ${productId}'s demo batches failed`, notCreated);
     await removeUnlinked(admin, created);
-    return failed(`${notCreated.length} new batches couldn't be created.`);
+    return failed(
+      `${notCreated.length} new ${plural(notCreated.length, "batch", "batches")} couldn't be created.`,
+    );
   }
 
   // The app deletes an empty list rather than saving "[]"

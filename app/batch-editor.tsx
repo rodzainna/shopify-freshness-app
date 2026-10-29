@@ -8,6 +8,7 @@ import {
   MAX_NEW_BATCHES_PER_SAVE,
   type NewBatch,
   maxNewBatches,
+  saveProblems,
   validateBatchEdit,
 } from "../shared/batch-edit";
 import {
@@ -442,26 +443,4 @@ function BatchRow({
       </s-box>
     </s-grid>
   );
-}
-
-function saveProblems(
-  failed: number,
-  failedNew: number,
-  dateFailed: boolean,
-): string | null {
-  const parts: string[] = [];
-  if (failed > 0) {
-    parts.push(
-      `${failed} ${failed === 1 ? "batch wasn't" : "batches weren't"} saved and kept the old values.`,
-    );
-  }
-  if (failedNew > 0) {
-    parts.push(
-      `${failedNew} new ${failedNew === 1 ? "batch wasn't" : "batches weren't"} added.`,
-    );
-  }
-  if (dateFailed) {
-    parts.push("The product's earliest expiry date didn't update.");
-  }
-  return parts.length > 0 ? `${parts.join(" ")} Try again.` : null;
 }

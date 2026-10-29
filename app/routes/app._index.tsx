@@ -39,6 +39,7 @@ import {
   DEFAULT_SORT,
   parseDashboardFilters,
 } from "../../shared/dashboard-filters";
+import { plural } from "../../shared/plural";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -269,7 +270,7 @@ function formatBatchTotal({ batchTotal, hasMoreBatches }: DashboardRow) {
 // "1 more batch", or "240+ more batches" when some didn't load
 function formatHiddenBatches({ hiddenBatches, hasMoreBatches }: DashboardRow) {
   if (hasMoreBatches) return `${hiddenBatches}+ more batches`;
-  return `${hiddenBatches} more ${hiddenBatches === 1 ? "batch" : "batches"}`;
+  return `${hiddenBatches} more ${plural(hiddenBatches, "batch", "batches")}`;
 }
 
 function statusTone(status: DashboardRow["status"]) {
