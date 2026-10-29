@@ -136,10 +136,9 @@ export default function SeedDemoPage() {
             <s-banner tone="warning" heading="Inventory tracking differs">
               {trackingDiffers}{" "}
               {plural(trackingDiffers, "product tracks", "products track")}{" "}
-              inventory differently from the plan, so the stock CSV can&apos;t
-              reset {plural(trackingDiffers, "it", "them")}. Turn tracking on or
-              off in the product&apos;s Inventory section to match the Planned
-              stock column.
+              inventory differently from the plan. Turn tracking on or off in
+              each product&apos;s Inventory section to match the Planned stock
+              column.
             </s-banner>
           )}
         </s-stack>

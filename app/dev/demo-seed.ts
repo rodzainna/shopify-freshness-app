@@ -52,10 +52,14 @@ export function demoStockCsv(
     .concat("\n");
 }
 
-// Products whose stock the CSV can reset: both sides track stock but differ
-export function countStockDiffers(
-  rows: readonly { plannedStock: number | null; storeStock: number | null }[],
-): number {
+// Planned and store stock for one product; null when that side doesn't track it
+export type StockRow = {
+  plannedStock: number | null;
+  storeStock: number | null;
+};
+
+// Products tracked on both sides whose stock differs from the plan
+export function countStockDiffers(rows: readonly StockRow[]): number {
   return rows.filter(
     ({ plannedStock, storeStock }) =>
       plannedStock !== null &&
@@ -64,10 +68,8 @@ export function countStockDiffers(
   ).length;
 }
 
-// Products the CSV can't fix: inventory tracking is on in only one of plan and store
-export function countTrackingDiffers(
-  rows: readonly { plannedStock: number | null; storeStock: number | null }[],
-): number {
+// Products whose inventory tracking is on in only one of plan and store
+export function countTrackingDiffers(rows: readonly StockRow[]): number {
   return rows.filter(
     ({ plannedStock, storeStock }) =>
       (plannedStock === null) !== (storeStock === null),
