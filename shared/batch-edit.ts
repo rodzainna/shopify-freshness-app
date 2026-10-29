@@ -1,5 +1,6 @@
 import type { Batch } from "./freshness";
 import { PRODUCT_GID } from "./product-gid";
+import { plural } from "./plural";
 import { MAX_BATCHES } from "./product-metafields";
 import { type BatchErrors, hasErrors, validateBatch } from "./validation";
 
@@ -248,4 +249,27 @@ function sameBatches(a: EditableBatch[], b: EditableBatch[]): boolean {
 
 export function sameValues(a: Batch, b: Batch): boolean {
   return a.quantity === b.quantity && a.expirationDate === b.expirationDate;
+}
+
+// The editor's message for a save that partly failed, or null if all of it saved
+export function saveProblems(
+  failed: number,
+  failedNew: number,
+  dateFailed: boolean,
+): string | null {
+  const parts: string[] = [];
+  if (failed > 0) {
+    parts.push(
+      `${failed} ${plural(failed, "batch wasn't", "batches weren't")} saved and kept the old values.`,
+    );
+  }
+  if (failedNew > 0) {
+    parts.push(
+      `${failedNew} new ${plural(failedNew, "batch wasn't", "batches weren't")} added.`,
+    );
+  }
+  if (dateFailed) {
+    parts.push("The product's earliest expiry date didn't update.");
+  }
+  return parts.length > 0 ? `${parts.join(" ")} Try again.` : null;
 }

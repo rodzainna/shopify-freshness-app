@@ -10,6 +10,7 @@ import {
   validateBatchEdit,
   validateNewBatches,
   parseBatchEditRequest,
+  saveProblems,
   planBatchEdit,
   validateEdit,
 } from "./batch-edit";
@@ -377,5 +378,29 @@ describe("parseBatchEditRequest", () => {
     ],
   ])("rejects %s", (_case, value) => {
     expect(parseBatchEditRequest(value)).toBeNull();
+  });
+});
+
+describe("saveProblems", () => {
+  it("returns null when everything saved", () => {
+    expect(saveProblems(0, 0, false)).toBeNull();
+  });
+
+  it("uses singular wording for one batch", () => {
+    expect(saveProblems(1, 1, false)).toBe(
+      "1 batch wasn't saved and kept the old values. 1 new batch wasn't added. Try again.",
+    );
+  });
+
+  it("uses plural wording for several batches", () => {
+    expect(saveProblems(2, 3, false)).toBe(
+      "2 batches weren't saved and kept the old values. 3 new batches weren't added. Try again.",
+    );
+  });
+
+  it("mentions the earliest expiry date when only it failed", () => {
+    expect(saveProblems(0, 0, true)).toBe(
+      "The product's earliest expiry date didn't update. Try again.",
+    );
   });
 });
