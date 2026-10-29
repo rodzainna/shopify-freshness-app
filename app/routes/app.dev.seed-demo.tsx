@@ -3,7 +3,11 @@ import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
-import { countStockDiffers, demoStockCsv } from "../dev/demo-seed";
+import {
+  countStockDiffers,
+  countTrackingDiffers,
+  demoStockCsv,
+} from "../dev/demo-seed";
 import { DEMO_PRODUCTS } from "../dev/demo-seed.data";
 import { plural } from "../../shared/plural";
 import {
@@ -53,6 +57,7 @@ export default function SeedDemoPage() {
     productId ? [{ ...row, productId }] : [],
   );
   const stockDiffers = countStockDiffers(inStore);
+  const trackingDiffers = countTrackingDiffers(inStore);
   let reseedLabel = `Reseed all ${inStore.length} products`;
   if (inStore.length === 0) reseedLabel = "No demo products to reseed";
   if (inStore.length === 1) reseedLabel = "Reseed 1 product";
@@ -125,6 +130,16 @@ export default function SeedDemoPage() {
               planned stock available. Import the stock CSV in Products →
               Inventory to reset it. Units held by unfulfilled orders still
               count as a difference.
+            </s-banner>
+          )}
+          {trackingDiffers > 0 && (
+            <s-banner tone="warning" heading="Inventory tracking differs">
+              {trackingDiffers}{" "}
+              {plural(trackingDiffers, "product tracks", "products track")}{" "}
+              inventory differently from the plan, so the stock CSV can&apos;t
+              reset {plural(trackingDiffers, "it", "them")}. Turn tracking on or
+              off in the product&apos;s Inventory section to match the Planned
+              stock column.
             </s-banner>
           )}
         </s-stack>

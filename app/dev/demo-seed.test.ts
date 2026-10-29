@@ -8,6 +8,7 @@ import { compareStock } from "../../shared/inventory";
 import {
   type DemoProduct,
   countStockDiffers,
+  countTrackingDiffers,
   demoStockCsv,
   planDemoBatches,
 } from "./demo-seed";
@@ -129,5 +130,20 @@ describe("countStockDiffers", () => {
 
   it("treats products untracked on both sides as matching", () => {
     expect(countStockDiffers([row(null, null)])).toBe(0);
+  });
+});
+
+describe("countTrackingDiffers", () => {
+  const row = (plannedStock: number | null, storeStock: number | null) => ({
+    plannedStock,
+    storeStock,
+  });
+
+  it("counts products tracked on only one side", () => {
+    expect(countTrackingDiffers([row(25, null), row(null, 12)])).toBe(2);
+  });
+
+  it("ignores products whose tracking matches the plan", () => {
+    expect(countTrackingDiffers([row(25, 24), row(null, null)])).toBe(0);
   });
 });

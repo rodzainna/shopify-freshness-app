@@ -64,6 +64,16 @@ export function countStockDiffers(
   ).length;
 }
 
+// Products the CSV can't fix: inventory tracking is on in only one of plan and store
+export function countTrackingDiffers(
+  rows: readonly { plannedStock: number | null; storeStock: number | null }[],
+): number {
+  return rows.filter(
+    ({ plannedStock, storeStock }) =>
+      (plannedStock === null) !== (storeStock === null),
+  ).length;
+}
+
 // A product without options is Shopify's single "Default Title" variant
 function stockRow({ handle, title, stock }: Tracked, location: string) {
   const options = ["Title", "Default Title", "", "", "", ""];
