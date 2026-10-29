@@ -399,8 +399,8 @@ function Extension({
                 );
                 const errors = showErrors ? validateBatch(batch) : {};
 
-                // One grid per row: keyed Fragments in a shared grid interleaved
-                // their cells. Keyed by handle, since the id changes on first save.
+                // One grid per row (a shared grid interleaved their cells); the
+                // fixed template keeps rows aligned. Keyed by handle: ids change on save.
                 return (
                   <s-grid
                     key={batch.handle}
