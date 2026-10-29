@@ -24,6 +24,7 @@ import {
   saveProductFreshnessVariables,
 } from "../../../shared/product-metafields";
 import { applySavedIds, failedItems } from "../../../shared/settled";
+import { plural } from "../../../shared/plural";
 import {
   MAX_QUANTITY,
   hasErrors,
@@ -357,7 +358,7 @@ function Extension({
   return (
     <s-admin-block
       heading="Freshness batches"
-      collapsedSummary={`${batches.length} ${batches.length === 1 ? "batch" : "batches"}`}
+      collapsedSummary={`${batches.length} ${plural(batches.length, "batch", "batches")}`}
     >
       <s-stack direction="block" gap="base">
         {saveError && (

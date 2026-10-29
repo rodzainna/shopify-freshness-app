@@ -17,6 +17,7 @@ import {
   formatDaysRemaining,
   showsSoldOut,
 } from "../shared/freshness";
+import { plural } from "../shared/plural";
 import {
   type ProductInventory,
   compareStock,
@@ -452,12 +453,12 @@ function saveProblems(
   const parts: string[] = [];
   if (failed > 0) {
     parts.push(
-      `${failed} ${failed === 1 ? "batch wasn't" : "batches weren't"} saved and kept the old values.`,
+      `${failed} ${plural(failed, "batch wasn't", "batches weren't")} saved and kept the old values.`,
     );
   }
   if (failedNew > 0) {
     parts.push(
-      `${failedNew} new ${failedNew === 1 ? "batch wasn't" : "batches weren't"} added.`,
+      `${failedNew} new ${plural(failedNew, "batch wasn't", "batches weren't")} added.`,
     );
   }
   if (dateFailed) {

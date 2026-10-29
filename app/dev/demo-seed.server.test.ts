@@ -105,7 +105,7 @@ describe("reseedProduct", () => {
 
     expect(await reseed()).toStrictEqual({
       kind: "failed",
-      message: "1 new batches couldn't be created.",
+      message: "1 new batch couldn't be created.",
     });
     expect(newIds().filter((id) => id && shopify.batch(id))).toEqual([]);
     expect(shopify.product(productId)?.batchIds).toEqual([OLD]);

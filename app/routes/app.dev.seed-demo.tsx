@@ -5,6 +5,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { demoStockCsv } from "../dev/demo-seed";
 import { DEMO_PRODUCTS } from "../dev/demo-seed.data";
+import { plural } from "../../shared/plural";
 import {
   type ReseedResult,
   readStoreProducts,
@@ -117,9 +118,12 @@ export default function SeedDemoPage() {
           </s-stack>
           {stockDiffers > 0 && (
             <s-banner tone="warning" heading="Stock differs from the plan">
-              {stockDiffers === 1
-                ? "1 product doesn't have its"
-                : `${stockDiffers} products don't have their`}{" "}
+              {stockDiffers}{" "}
+              {plural(
+                stockDiffers,
+                "product doesn't have its",
+                "products don't have their",
+              )}{" "}
               planned stock available. Import the stock CSV in Products →
               Inventory to reset it. Units held by unfulfilled orders still
               count as a difference.
