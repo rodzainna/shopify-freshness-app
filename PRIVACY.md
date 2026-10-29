@@ -4,9 +4,9 @@ This notice describes the personal data Freshness Tracker processes, why, and ho
 
 ## What the app receives
 
-- **Fulfillment webhooks (`fulfillments/create`).** The app uses only each line item's product ID and fulfilled quantity, to decrement that product's expiry-tracked batches. The decrement is still being built: until it ships, these webhooks are acknowledged and their contents discarded.
+- **Fulfillment webhooks (`fulfillments/create`).** The app uses only each line item's product ID and fulfilled quantity, to decrement that product's expiry-tracked batches.
 - **No customer fields.** The app doesn't request access to customer names, email addresses, phone numbers or addresses, so Shopify redacts them before delivery.
-- **Product data** (titles, inventory totals, batch quantities and expiry dates). This isn't personal data.
+- **Product data** (titles, vendors, types, inventory totals, batch quantities and expiry dates). This isn't personal data. The CSV export sends it straight to the merchant's browser; the app doesn't keep a copy.
 
 ## What the app stores
 

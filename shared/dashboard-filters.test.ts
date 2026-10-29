@@ -19,6 +19,7 @@ import {
   presetRange,
   isAppSort,
   sortByExpiry,
+  viewSearch,
 } from "./dashboard-filters";
 
 const none: DashboardFilters = {
@@ -475,5 +476,21 @@ describe("row filters", () => {
     expect(ids({ statuses: ["fresh"], stock: ["unbatched"] })).toStrictEqual([
       "cheddar",
     ]);
+  });
+});
+
+describe("viewSearch", () => {
+  it("keeps the filters and sort, dropping Shopify's launch params", () => {
+    expect(
+      viewSearch(
+        "?embedded=1&hmac=abc&id_token=jwt&host=x&shop=s&q=milk&status=expired&status=fresh&sort=expiry&page=2",
+      ),
+    ).toBe("?q=milk&status=expired&status=fresh&sort=expiry");
+  });
+
+  it("keeps the expiry range", () => {
+    expect(
+      viewSearch("?expiry=custom&expiry_from=2026-11-01&expiry_to=2026-11-30"),
+    ).toBe("?expiry=custom&expiry_from=2026-11-01&expiry_to=2026-11-30");
   });
 });

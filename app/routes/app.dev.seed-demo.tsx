@@ -18,6 +18,7 @@ import {
 } from "../dev/demo-seed.server";
 import { readShopToday } from "../fulfillment-shopify.server";
 import { authenticate } from "../shopify.server";
+import { saveFile } from "../save-file";
 
 const LOCATION = "Shop location";
 
@@ -88,17 +89,11 @@ export default function SeedDemoPage() {
     setRunning(false);
   };
 
-  const downloadStockCsv = () => {
-    const blob = new Blob([demoStockCsv(DEMO_PRODUCTS, LOCATION)], {
-      type: "text/csv",
-    });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "demo-stock.csv";
-    link.click();
-    // Some browsers start the download after this handler returns
-    setTimeout(() => URL.revokeObjectURL(link.href));
-  };
+  const downloadStockCsv = () =>
+    saveFile(
+      new Blob([demoStockCsv(DEMO_PRODUCTS, LOCATION)], { type: "text/csv" }),
+      "demo-stock.csv",
+    );
 
   return (
     <s-page heading="Reseed demo batches">

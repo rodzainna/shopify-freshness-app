@@ -36,7 +36,7 @@ The app runs on a development store with 60 demo food products. It isn't deploye
 | Freshness dashboard                             | Done                                                             |
 | Fulfillment and compliance webhooks             | Done: signature-verified; fulfillments deduplicated and recorded |
 | Decrementing batches when an order is fulfilled | Done: FEFO, per-product lock, retry-safe; shortfalls recorded    |
-| CSV export of batches                           | In progress: file builder done; download route and button next   |
+| CSV export of batches                           | Done                                                             |
 
 ## Features
 
@@ -54,6 +54,7 @@ The app runs on a development store with 60 demo food products. It isn't deploye
 - Search, sorting by product, stock, type, vendor or earliest expiry (soonest first, listing products that have an expiry date; Shopify can't sort by a metafield, so the app reads up to 1,000 dates cheaply, sorts them, and then loads only the page shown with its batches), and filters for type, vendor, status, stock check, tracked products and expiry. The expiry filter offers "Already expired", "Today", "Next 7 days", "Next 30 days" (counted from the shop's own date) or a custom range, matched against each product's earliest in-stock expiry by Shopify's search. Sort and filters live in the URL, and clearing the filters keeps the sort.
 - An editor per product: change batch quantities and dates, or add new batches (up to 25 per save), including to a product that has none. A running total of stock and batch units updates as you type. Saves take the product's lock and refuse if the batches changed since the editor opened. Removing a batch stays in the product panel.
 - An empty state when the store has no products.
+- **Export CSV** in the page header downloads what the current search, filters and sort match, up to 1,000 products. It writes one row per batch, repeating the product's name, vendor, type, stock and admin link, and marks each product's batches as Single, Multiple or None. A product with no batches gets one row. Quantity and expiry date are written as stored, with days left, the batch's status (or Sold out) and the product's status. The file is named `freshness-batches-YYYY-MM-DD.csv` for the shop's date.
 
 **Privacy page** (`/app/privacy`)
 
@@ -106,6 +107,9 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 - **Products with more than 250 batches** show partial unit totals, marked with a "+", since the dashboard reads 250 batches per product.
 - **The product page panel saves straight to Shopify, without the app's product lock.** The panel's and a fulfillment's batch list writes both refuse a stale list, so a batch added in the panel mid-fulfillment is kept. A panel quantity edit at the same moment as a fulfillment can still overwrite the other's quantity, and a fulfillment that empties the last batch deletes the list unchecked, since Shopify's `metafieldsDelete` has no stale check.
 - **Batch edits made outside the app, such as in Shopify's metaobject editor, don't update the earliest expiry.** The product's stored date stays as it was until the app next saves that product's batches. That date drives the dashboard's Earliest expiry column and the expiry sort and filter, and it's what a theme can read. A value the app wouldn't accept there, such as 0 units, blocks panel and editor saves until it's fixed, or until the batch is removed in the panel.
+- **The CSV export covers up to 1,000 products.** Status, stock and tracked are checked by the app after loading, so the limit counts the products checked, not the matches; a search, type, vendor or expiry filter narrows it.
+- **A CSV export taken while products change can miss one.** Shopify's paged reads have no snapshot, so a product whose sort value moves it onto a page already read is left out. A product seen twice, or batches edited between reads, stops the export with "Try again".
+- **The CSV export reads every batch,** so for a product with more than 250 batches its status filter can differ from the dashboard's.
 - **If Shopify can't be reached while the app signs in**, the admin shows Shopify's bare "Handling response" page instead of a message. Signing in can refresh the access token, which calls Shopify. Errors while the dashboard loads its data show a message with Try again.
 
 ## Roadmap
