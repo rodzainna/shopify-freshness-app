@@ -1,6 +1,7 @@
 {
   "name": "freshness-tracker",
   "private": true,
+  "description": "Embedded Shopify app that tracks perishable stock in expiry-dated batches and deducts fulfillments first expired, first out (FEFO)",
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "build": "react-router build",
