@@ -3,7 +3,7 @@ import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
-import { demoStockCsv } from "../dev/demo-seed";
+import { countStockDiffers, demoStockCsv } from "../dev/demo-seed";
 import { DEMO_PRODUCTS } from "../dev/demo-seed.data";
 import { plural } from "../../shared/plural";
 import {
@@ -52,9 +52,7 @@ export default function SeedDemoPage() {
   const inStore = rows.flatMap(({ productId, ...row }) =>
     productId ? [{ ...row, productId }] : [],
   );
-  const stockDiffers = inStore.filter(
-    ({ plannedStock, storeStock }) => plannedStock !== storeStock,
-  ).length;
+  const stockDiffers = countStockDiffers(inStore);
   let reseedLabel = `Reseed all ${inStore.length} products`;
   if (inStore.length === 0) reseedLabel = "No demo products to reseed";
   if (inStore.length === 1) reseedLabel = "Reseed 1 product";

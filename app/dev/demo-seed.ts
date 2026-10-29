@@ -52,6 +52,18 @@ export function demoStockCsv(
     .concat("\n");
 }
 
+// Products whose stock the CSV can reset: both sides track stock but differ
+export function countStockDiffers(
+  rows: readonly { plannedStock: number | null; storeStock: number | null }[],
+): number {
+  return rows.filter(
+    ({ plannedStock, storeStock }) =>
+      plannedStock !== null &&
+      storeStock !== null &&
+      plannedStock !== storeStock,
+  ).length;
+}
+
 // A product without options is Shopify's single "Default Title" variant
 function stockRow({ handle, title, stock }: Tracked, location: string) {
   const options = ["Title", "Default Title", "", "", "", ""];
