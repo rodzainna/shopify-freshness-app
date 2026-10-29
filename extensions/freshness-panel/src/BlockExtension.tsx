@@ -399,10 +399,11 @@ function Extension({
                 );
                 const errors = showErrors ? validateBatch(batch) : {};
 
-                // One grid per row (a shared grid interleaved their cells); the
-                // fixed template keeps rows aligned. Keyed by handle: ids change on save.
+                // One grid per row (a shared grid interleaved cells), each on
+                // the same fixed template so the rows line up
                 return (
                   <s-grid
+                    // The handle survives the first save; the id becomes a GID
                     key={batch.handle}
                     gridTemplateColumns={ROW_COLUMNS}
                     columnGap="base"
