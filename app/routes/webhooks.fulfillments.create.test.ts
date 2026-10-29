@@ -58,7 +58,7 @@ async function clearTestData() {
 
 describe("fulfillments/create webhook", () => {
   beforeEach(async () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.mocked(runFulfillmentJob).mockReset().mockResolvedValue();
     await clearTestData();

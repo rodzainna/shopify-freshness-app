@@ -5,7 +5,14 @@ import {
   validateNewBatches,
 } from "../../shared/batch-edit";
 import { compareStock } from "../../shared/inventory";
-import { type DemoProduct, demoStockCsv, planDemoBatches } from "./demo-seed";
+import {
+  type DemoProduct,
+  type StockRow,
+  countStockDiffers,
+  countTrackingDiffers,
+  demoStockCsv,
+  planDemoBatches,
+} from "./demo-seed";
 import { DEMO_PRODUCTS } from "./demo-seed.data";
 
 const counter = () => {
@@ -105,4 +112,45 @@ describe("demoStockCsv", () => {
       ',"Shop\rlocation",25\n',
     );
   });
+});
+
+const row = (
+  plannedStock: number | null,
+  storeStock: number | null,
+): StockRow => ({ plannedStock, storeStock });
+
+describe("countStockDiffers", () => {
+  it("counts products whose store stock differs from the plan", () => {
+    expect(countStockDiffers([row(25, 24), row(10, 10), row(5, 0)])).toBe(2);
+  });
+
+  it("leaves out products tracked on only one side", () => {
+    expect(countStockDiffers([row(25, null), row(null, 12)])).toBe(0);
+  });
+
+  it("treats products untracked on both sides as matching", () => {
+    expect(countStockDiffers([row(null, null)])).toBe(0);
+  });
+});
+
+describe("countTrackingDiffers", () => {
+  it("counts products tracked on only one side", () => {
+    expect(countTrackingDiffers([row(25, null), row(null, 12)])).toBe(2);
+  });
+
+  it("ignores products whose tracking matches the plan", () => {
+    expect(countTrackingDiffers([row(25, 24), row(null, null)])).toBe(0);
+  });
+});
+
+it("never counts a product in both stock banners", () => {
+  const rows = [
+    row(25, 24),
+    row(10, 10),
+    row(25, null),
+    row(null, 12),
+    row(null, null),
+  ];
+  expect(countStockDiffers(rows)).toBe(1);
+  expect(countTrackingDiffers(rows)).toBe(2);
 });

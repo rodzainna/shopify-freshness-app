@@ -42,7 +42,7 @@ async function clearTestData() {
 
 describe("app/uninstalled webhook", () => {
   beforeEach(async () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
     await clearTestData();
     await seedShopData(shop);
     await seedShopData(otherShop);

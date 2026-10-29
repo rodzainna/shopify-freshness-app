@@ -3,7 +3,11 @@ import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
-import { demoStockCsv } from "../dev/demo-seed";
+import {
+  countStockDiffers,
+  countTrackingDiffers,
+  demoStockCsv,
+} from "../dev/demo-seed";
 import { DEMO_PRODUCTS } from "../dev/demo-seed.data";
 import { plural } from "../../shared/plural";
 import {
@@ -52,9 +56,8 @@ export default function SeedDemoPage() {
   const inStore = rows.flatMap(({ productId, ...row }) =>
     productId ? [{ ...row, productId }] : [],
   );
-  const stockDiffers = inStore.filter(
-    ({ plannedStock, storeStock }) => plannedStock !== storeStock,
-  ).length;
+  const stockDiffers = countStockDiffers(inStore);
+  const trackingDiffers = countTrackingDiffers(inStore);
   let reseedLabel = `Reseed all ${inStore.length} products`;
   if (inStore.length === 0) reseedLabel = "No demo products to reseed";
   if (inStore.length === 1) reseedLabel = "Reseed 1 product";
@@ -129,6 +132,15 @@ export default function SeedDemoPage() {
               count as a difference.
             </s-banner>
           )}
+          {trackingDiffers > 0 && (
+            <s-banner tone="warning" heading="Inventory tracking differs">
+              {trackingDiffers}{" "}
+              {plural(trackingDiffers, "product tracks", "products track")}{" "}
+              inventory differently from the plan. Turn tracking on or off in
+              each product&apos;s Inventory section to match the Planned stock
+              column.
+            </s-banner>
+          )}
         </s-stack>
       </s-section>
       <s-section padding="none">
@@ -141,22 +153,20 @@ export default function SeedDemoPage() {
             <s-table-header listSlot="secondary">Result</s-table-header>
           </s-table-header-row>
           <s-table-body>
-            {rows.map((row) => (
+            {rows.map(({ productId, ...row }) => (
               <s-table-row key={row.handle}>
                 <s-table-cell>{row.title}</s-table-cell>
                 <s-table-cell>{row.batches}</s-table-cell>
                 <s-table-cell>{row.plannedStock ?? "Not tracked"}</s-table-cell>
                 <s-table-cell>
-                  {row.productId ? (row.storeStock ?? "Not tracked") : "—"}
+                  {productId ? (row.storeStock ?? "Not tracked") : "—"}
                 </s-table-cell>
                 <s-table-cell>
-                  {row.productId ? (
+                  {productId ? (
                     <Result
                       state={states[row.handle] ?? { kind: "idle" }}
                       retry={
-                        busy
-                          ? undefined
-                          : () => reseed(row.handle, row.productId!)
+                        busy ? undefined : () => reseed(row.handle, productId)
                       }
                     />
                   ) : (

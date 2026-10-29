@@ -34,7 +34,7 @@ function deliver(topic: string) {
 
 describe("compliance webhooks", () => {
   beforeEach(async () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
     await clearShopData(shops);
     await seedShopData(shop);
     await seedShopData(otherShop);

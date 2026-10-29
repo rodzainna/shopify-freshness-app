@@ -52,6 +52,30 @@ export function demoStockCsv(
     .concat("\n");
 }
 
+// Planned and store stock for one product; null when that side doesn't track it
+export type StockRow = {
+  plannedStock: number | null;
+  storeStock: number | null;
+};
+
+// Products tracked on both sides whose stock differs from the plan
+export function countStockDiffers(rows: readonly StockRow[]): number {
+  return rows.filter(
+    ({ plannedStock, storeStock }) =>
+      plannedStock !== null &&
+      storeStock !== null &&
+      plannedStock !== storeStock,
+  ).length;
+}
+
+// Products whose inventory tracking is on in only one of plan and store
+export function countTrackingDiffers(rows: readonly StockRow[]): number {
+  return rows.filter(
+    ({ plannedStock, storeStock }) =>
+      (plannedStock === null) !== (storeStock === null),
+  ).length;
+}
+
 // A product without options is Shopify's single "Default Title" variant
 function stockRow({ handle, title, stock }: Tracked, location: string) {
   const options = ["Title", "Default Title", "", "", "", ""];
