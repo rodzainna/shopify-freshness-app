@@ -1,4 +1,5 @@
 import type { NewBatch } from "../../shared/batch-edit";
+import { csvCell } from "../../shared/csv";
 import { addDays } from "../../shared/freshness";
 
 export type DemoProduct = {
@@ -80,8 +81,4 @@ export function countTrackingDiffers(rows: readonly StockRow[]): number {
 function stockRow({ handle, title, stock }: Tracked, location: string) {
   const options = ["Title", "Default Title", "", "", "", ""];
   return [handle, title, ...options, location, String(stock)];
-}
-
-function csvCell(value: string): string {
-  return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
 }
