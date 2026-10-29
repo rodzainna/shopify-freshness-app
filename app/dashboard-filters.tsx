@@ -57,7 +57,11 @@ export function useDashboardFilters(filters: DashboardFilters) {
   const location = useLocation();
   const navigation = useNavigation();
   const latestSearch = useRef(location.search);
-  latestSearch.current = navigation.location?.search ?? location.search;
+  // A navigation to another page isn't this view
+  latestSearch.current =
+    navigation.location?.pathname === location.pathname
+      ? navigation.location.search
+      : location.search;
 
   // From the newest URL, so a sort still loading shows as chosen
   const sort = parseSort(new URLSearchParams(latestSearch.current));
@@ -93,17 +97,19 @@ export function useDashboardFilters(filters: DashboardFilters) {
   function search(value: string) {
     setText(value);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      timer.current = undefined;
-      // Replace, so each pause in typing doesn't add a Back step
-      update(
-        (params) => {
-          if (value.trim()) params.set(FILTER_PARAMS.search, value.trim());
-          else params.delete(FILTER_PARAMS.search);
-        },
-        { replace: true },
-      );
-    }, SEARCH_DELAY_MS);
+    timer.current = setTimeout(() => runSearch(value), SEARCH_DELAY_MS);
+  }
+
+  function runSearch(value: string) {
+    timer.current = undefined;
+    // Replace, so each pause in typing doesn't add a Back step
+    update(
+      (params) => {
+        if (value.trim()) params.set(FILTER_PARAMS.search, value.trim());
+        else params.delete(FILTER_PARAMS.search);
+      },
+      { replace: true },
+    );
   }
 
   function setFilter(param: string, values: string[]) {
@@ -147,9 +153,19 @@ export function useDashboardFilters(filters: DashboardFilters) {
     update(clearFilters);
   }
 
+  // Runs a search still waiting on typing, then gives the view's URL search
+  function commitSearch(): string {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      runSearch(text);
+    }
+    return latestSearch.current;
+  }
+
   return {
     text,
     sort,
+    commitSearch,
     search,
     setFilter,
     setExpiry,

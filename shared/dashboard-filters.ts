@@ -376,3 +376,16 @@ function escapeSearchText(text: string): string {
     })
     .join(" ");
 }
+
+const VIEW_PARAMS = new Set<string>([
+  ...Object.values(FILTER_PARAMS),
+  SORT_PARAM,
+]);
+
+/** The URL's filters and sort only, leaving out others such as Shopify's launch params. */
+export function viewSearch(search: string): string {
+  const view = [...new URLSearchParams(search)].filter(([key]) =>
+    VIEW_PARAMS.has(key),
+  );
+  return `?${new URLSearchParams(view)}`;
+}

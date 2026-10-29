@@ -15,6 +15,7 @@ import {
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { BATCH_EDITOR_ID, BatchEditor, type EditTarget } from "../batch-editor";
+import { ExportButton } from "../export-button";
 import { StockBadges } from "../stock-badges";
 import { isShopifySignIn, shopifyResponse } from "../shopify-response";
 import { Pager } from "../pager";
@@ -93,6 +94,7 @@ export default function Dashboard() {
 
   return (
     <s-page heading="Freshness overview" inlineSize="large">
+      <ExportButton commitSearch={controls.commitSearch} />
       <s-section padding="none">
         <s-table loading={loading || undefined}>
           <DashboardFilterBar
