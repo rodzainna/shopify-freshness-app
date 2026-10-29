@@ -74,7 +74,7 @@ interface RowsByIdData {
   nodes: (DashboardProductNode | null)[];
 }
 
-type ProductView = { query: string | null } & ProductSort;
+export type ProductView = { query: string | null } & ProductSort;
 
 interface DashboardPage {
   rows: DashboardRow[];
@@ -92,9 +92,7 @@ export async function loadDashboardPage(
 ): Promise<DashboardPage> {
   // One instant, so a preset and the rows' statuses share the same date
   const now = new Date();
-  const { expiry, presetToday } = await resolveExpiry(admin, filters, now);
-  const query = toProductQuery(filters, expiry);
-  const view = { query, ...toProductSort(filters.sort) };
+  const { view, presetToday } = await resolveProductView(admin, filters, now);
   if (hasRowFilters(filters)) {
     return loadCheckedPage(admin.graphql, view, filters, presetToday, now);
   }
@@ -236,6 +234,22 @@ async function loadCheckedPage(
     totalPages,
     checked: { products: checkedProducts, more: uncheckedProducts },
     today,
+  };
+}
+
+/** The Shopify search and sort for the filters, and the date a preset used. */
+export async function resolveProductView(
+  admin: AdminApiContext,
+  filters: DashboardFilters,
+  now: Date,
+): Promise<{ view: ProductView; presetToday: string | null }> {
+  const { expiry, presetToday } = await resolveExpiry(admin, filters, now);
+  return {
+    view: {
+      query: toProductQuery(filters, expiry),
+      ...toProductSort(filters.sort),
+    },
+    presetToday,
   };
 }
 
