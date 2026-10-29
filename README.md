@@ -131,6 +131,8 @@ Planned, not scheduled:
 - **React Router is pinned to 7.18.2** (`react-router`, `@react-router/*`). 7.18.3 tightened action-origin checks, so every action returns `400 Bad Request` under `shopify app dev` and behind TLS-terminating proxies ([template issue #279](https://github.com/Shopify/shopify-app-template-react-router/issues/279)).
 - **`qs` is forced to `^6.16.0`** through `overrides`, to clear [CVE-2026-82562](https://github.com/advisories/GHSA-x5fp-wj9c-mxmx) and [CVE-2026-82417](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g), which reach the app through `@react-router/serve` → `express@4`.
 - **`p-map` is forced to `^4.0.0`**, which came with the Shopify template. Its reason isn't documented there.
+- **Prisma stays on 6.** Shopify's session storage adapter only supports Prisma 6 ([shopify-app-js#2949](https://github.com/Shopify/shopify-app-js/issues/2949)). `@prisma/config`'s `deepmerge-ts` is forced to `^8.0.2` to clear [GHSA-ggr8-5vv4-36mx](https://github.com/advisories/GHSA-ggr8-5vv4-36mx) in the Prisma CLI's config loader, which pins 7.1.5.
+- **Dev tooling:** GraphQL codegen's `lodash` is forced to `^4.18.1` and typescript-eslint's `minimatch` to `^9.0.9`, scoped to those packages, to clear their advisories. `@graphql-tools/utils` advisories remain in GraphQL codegen, which accepts only versions without a fix; codegen runs locally and never ships.
 
 ## Project structure
 
