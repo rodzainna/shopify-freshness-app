@@ -9,6 +9,7 @@ import {
   demoStockCsv,
 } from "../dev/demo-seed";
 import { DEMO_PRODUCTS } from "../dev/demo-seed.data";
+import { productStock } from "../../shared/inventory";
 import { plural } from "../../shared/plural";
 import {
   type ReseedResult,
@@ -33,7 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const byHandle = new Map(store.map((product) => [product.handle, product]));
   const rows = DEMO_PRODUCTS.map(({ handle, title, stock, batches }) => {
     const found = byHandle.get(handle);
-    const storeStock = found?.tracksInventory ? found.totalInventory : null;
+    const storeStock = found ? productStock(found) : null;
     return {
       handle,
       title,
