@@ -216,6 +216,22 @@ describe("loadExportProducts", () => {
     });
   });
 
+  it("fails when a product comes back on a second page", async () => {
+    const shop = products(300);
+    const { admin } = fakeShop([
+      ...shop.slice(0, 250),
+      shop[0],
+      ...shop.slice(250),
+    ]);
+
+    const read = loadExportProducts(admin, filters(), NOW);
+
+    await expect(read).rejects.toThrow(ExportChangedError);
+    await expect(read).rejects.toThrow(
+      "Product Product 1 moved during the export",
+    );
+  });
+
   it("sorts by earliest expiry, soonest first, for the expiry sort", async () => {
     const { admin, graphql } = fakeShop([
       product(1, 1, "2026-12-01"),
@@ -245,6 +261,80 @@ describe("loadExportProducts", () => {
     expect(
       result.kind === "ready" && result.products.map(({ title }) => title),
     ).toStrictEqual(["Product 1", "Product 2"]);
+  });
+
+  it("keeps only the products a status filter matches", async () => {
+    const expired = product(1);
+    expired.batches[0].expirationDate.value = "2026-10-01";
+    const { admin } = fakeShop([expired, product(2)]);
+
+    const result = await loadExportProducts(
+      admin,
+      filters("status=expired"),
+      NOW,
+    );
+
+    expect(
+      result.kind === "ready" && result.products.map(({ title }) => title),
+    ).toStrictEqual(["Product 1"]);
+  });
+
+  it("filters by status only after reading every batch", async () => {
+    const long = product(1, 300);
+    // Past the first 250, so a filter run on the first read would miss it
+    long.batches[280].expirationDate.value = "2026-10-01";
+    const { admin } = fakeShop([long]);
+
+    const result = await loadExportProducts(
+      admin,
+      filters("status=expired"),
+      NOW,
+    );
+
+    expect(result.kind === "ready" && result.products).toHaveLength(1);
+  });
+
+  it("keeps only products with batches for Tracked only", async () => {
+    const { admin } = fakeShop([product(1), product(2, 0)]);
+
+    const result = await loadExportProducts(admin, filters("tracked=1"), NOW);
+
+    expect(
+      result.kind === "ready" && result.products.map(({ title }) => title),
+    ).toStrictEqual(["Product 1"]);
+  });
+
+  it("counts the products checked, not the matches, against the limit", async () => {
+    // A count at the limit, so the refusal comes from the products checked
+    const { admin } = fakeShop(products(EXPORT_LIMIT + 1), {
+      count: EXPORT_LIMIT,
+    });
+
+    const result = await loadExportProducts(
+      admin,
+      filters("status=expired"),
+      NOW,
+    );
+
+    expect(result).toStrictEqual({ kind: "tooMany" });
+  });
+
+  it("sorts the filtered products by expiry", async () => {
+    const later = product(1, 1, "2026-10-10");
+    later.batches[0].expirationDate.value = "2026-10-10";
+    const sooner = product(2, 1, "2026-10-01");
+    sooner.batches[0].expirationDate.value = "2026-10-01";
+    const { admin } = fakeShop([later, product(3, 1, "2026-11-01"), sooner]);
+
+    const result = await loadExportProducts(
+      admin,
+      filters("status=expired&sort=expiry"),
+      NOW,
+    );
+
+    expect(
+      result.kind === "ready" && result.products.map(({ title }) => title),
+    ).toStrictEqual(["Product 2", "Product 1"]);
   });
 
   it("reads every batch of a product with more than 250", async () => {
@@ -278,7 +368,7 @@ describe("loadExportProducts", () => {
     );
   });
 
-  it("leaves a list partial instead of looping when Shopify gives no cursor", async () => {
+  it("fails instead of rereading batches when Shopify gives no cursor", async () => {
     const { admin, graphql } = fakeShop([product(1, 300)]);
     const read = graphql.getMockImplementation()!;
     graphql.mockImplementation(async (query, options) => {
@@ -299,13 +389,10 @@ describe("loadExportProducts", () => {
       return { json: async () => ({ data }) };
     });
 
-    const result = await loadExportProducts(admin, filters(), NOW);
-
+    await expect(loadExportProducts(admin, filters(), NOW)).rejects.toThrow(
+      "Shopify gave no cursor for Product 1's batches",
+    );
     expect(queriesNamed(graphql, "ExportMoreBatches")).toHaveLength(0);
-    expect(
-      result.kind === "ready" &&
-        result.products[0].freshnessBatches?.references.pageInfo.hasNextPage,
-    ).toBe(true);
   });
 
   it("fails when the product is deleted between reads", async () => {

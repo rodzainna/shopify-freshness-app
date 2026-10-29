@@ -3,9 +3,11 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { type ProductView, resolveProductView } from "./dashboard.server";
 import { query } from "./fulfillment-shopify.server";
 import type { ExportProduct } from "../shared/csv-export";
-import { earliestDateOf } from "../shared/dashboard";
+import { earliestDateOf, toDashboardRows } from "../shared/dashboard";
 import {
   type DashboardFilters,
+  filterRows,
+  hasRowFilters,
   isAppSort,
   sortByExpiry,
 } from "../shared/dashboard-filters";
@@ -50,7 +52,7 @@ interface MoreBatchesData {
   product: { freshnessBatches: BatchList | null } | null;
 }
 
-/** A batch list changed between its page reads; trying again reads it fresh. */
+/** Products or batches changed between page reads; trying again reads them fresh. */
 export class ExportChangedError extends Error {
   name = "ExportChangedError";
 }
@@ -59,14 +61,14 @@ export type ExportData =
   | { kind: "ready"; products: ExportProduct[]; today: string }
   | { kind: "tooMany" };
 
-/** Every product the dashboard's search matches, in its order, with all its batches. */
+/** Every product the dashboard's filters match, in its order, with all its batches. */
 export async function loadExportProducts(
   admin: AdminApiContext,
   filters: DashboardFilters,
   now = new Date(),
 ): Promise<ExportData> {
   const { view, presetToday } = await resolveProductView(admin, filters, now);
-  const products: ExportNode[] = [];
+  const products = new Map<string, ExportNode>();
   let timezone = "";
   let after: string | null = null;
   for (;;) {
@@ -76,9 +78,17 @@ export async function loadExportProducts(
       return { kind: "tooMany" };
     }
     timezone = data.shop.ianaTimezone;
-    products.push(...data.products.nodes);
+    for (const node of data.products.nodes) {
+      // Its sort value changed between reads, which can also skip a product
+      if (products.has(node.id)) {
+        throw new ExportChangedError(
+          `Product ${node.title} moved during the export`,
+        );
+      }
+      products.set(node.id, node);
+    }
     if (!data.products.pageInfo.hasNextPage) break;
-    if (products.length >= EXPORT_LIMIT) return { kind: "tooMany" };
+    if (products.size >= EXPORT_LIMIT) return { kind: "tooMany" };
     after = data.products.pageInfo.endCursor;
     // Reading on from the start would repeat products
     if (after === null) {
@@ -88,14 +98,33 @@ export async function loadExportProducts(
 
   const complete: ExportNode[] = [];
   // One at a time: few products pass 250 batches, and each read is small
-  for (const product of products) {
+  for (const product of products.values()) {
     complete.push(await withEveryBatch(admin, product));
   }
+  const today = presetToday ?? getShopToday(timezone, now);
+  const matching = hasRowFilters(filters)
+    ? withRowFilters(complete, filters, today)
+    : complete;
   return {
     kind: "ready",
-    products: isAppSort(filters.sort) ? byEarliestExpiry(complete) : complete,
-    today: presetToday ?? getShopToday(timezone, now),
+    products: isAppSort(filters.sort) ? byEarliestExpiry(matching) : matching,
+    today,
   };
+}
+
+// Status, stock and tracked need the batches, so they're applied here, as on
+// the dashboard; the 1,000 limit counts the products checked
+function withRowFilters(
+  products: ExportNode[],
+  filters: DashboardFilters,
+  today: string,
+): ExportNode[] {
+  const rows = toDashboardRows(
+    products.map((product) => ({ ...product, featuredMedia: null })),
+    today,
+  );
+  const kept = new Set(filterRows(rows, filters).map(({ id }) => id));
+  return products.filter(({ id }) => kept.has(id));
 }
 
 // Shopify can't sort by a metafield, so the expiry sort happens here
@@ -116,8 +145,11 @@ async function withEveryBatch(
   if (!list?.references.pageInfo.hasNextPage) return product;
   const nodes = [...list.references.nodes];
   let references = list.references;
-  // Without a cursor the list stays partial, which the file builder refuses
-  while (references.pageInfo.hasNextPage && references.pageInfo.endCursor) {
+  while (references.pageInfo.hasNextPage) {
+    // Reading on from the start would repeat batches
+    if (references.pageInfo.endCursor === null) {
+      throw new Error(`Shopify gave no cursor for ${product.title}'s batches`);
+    }
     const next = await fetchMoreBatches(
       admin,
       product.id,
