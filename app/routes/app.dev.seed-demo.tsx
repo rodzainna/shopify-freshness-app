@@ -141,22 +141,20 @@ export default function SeedDemoPage() {
             <s-table-header listSlot="secondary">Result</s-table-header>
           </s-table-header-row>
           <s-table-body>
-            {rows.map((row) => (
+            {rows.map(({ productId, ...row }) => (
               <s-table-row key={row.handle}>
                 <s-table-cell>{row.title}</s-table-cell>
                 <s-table-cell>{row.batches}</s-table-cell>
                 <s-table-cell>{row.plannedStock ?? "Not tracked"}</s-table-cell>
                 <s-table-cell>
-                  {row.productId ? (row.storeStock ?? "Not tracked") : "—"}
+                  {productId ? (row.storeStock ?? "Not tracked") : "—"}
                 </s-table-cell>
                 <s-table-cell>
-                  {row.productId ? (
+                  {productId ? (
                     <Result
                       state={states[row.handle] ?? { kind: "idle" }}
                       retry={
-                        busy
-                          ? undefined
-                          : () => reseed(row.handle, row.productId!)
+                        busy ? undefined : () => reseed(row.handle, productId)
                       }
                     />
                   ) : (
