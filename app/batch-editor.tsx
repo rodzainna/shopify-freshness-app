@@ -22,6 +22,7 @@ import {
   type ProductInventory,
   compareStock,
   matchesStock,
+  productStock,
 } from "../shared/inventory";
 import { MAX_BATCHES } from "../shared/product-metafields";
 import { StockBadges } from "./stock-badges";
@@ -330,9 +331,8 @@ function StockSummary({
     emptyIsUnbatched: true,
   });
   const { batchTotal, uncountedBatches } = comparison;
-  const stock = inventory.tracksInventory
-    ? `Stock ${inventory.totalInventory}`
-    : "Stock not tracked";
+  const units = productStock(inventory);
+  const stock = units === null ? "Stock not tracked" : `Stock ${units}`;
   return (
     <s-stack direction="inline" gap="small-200" alignItems="center">
       <s-text>

@@ -4,7 +4,7 @@ import {
   batchFreshnessOrNull,
   computeAggregateFreshness,
 } from "./freshness";
-import { type ProductInventory, compareStock } from "./inventory";
+import { type ProductInventory, compareStock, productStock } from "./inventory";
 import { type BatchNode, isReadableBatch } from "./product-metafields";
 
 // The dashboard query's product shape (see app/dashboard.server.ts)
@@ -74,6 +74,20 @@ export function earliestDateOf(
   return product.earliestExpiration?.value ?? null;
 }
 
+/** A readable batch as the dashboard and export parse it. */
+export function toDashboardBatch(
+  node: BatchNode & { id: string },
+  today: string,
+): DashboardBatch {
+  const expirationDate = node.expirationDate?.value ?? "";
+  return {
+    id: node.id,
+    quantity: Number(node.quantity?.value ?? 0),
+    expirationDate,
+    freshness: batchFreshnessOrNull(expirationDate, today),
+  };
+}
+
 export function toDashboardRows(
   products: DashboardProductNode[],
   today: string,
@@ -87,7 +101,7 @@ export function toDashboardRows(
       adminUrl: `${ADMIN_PRODUCTS}/${product.legacyResourceId}`,
       imageUrl: product.featuredMedia?.preview?.image?.url ?? null,
       earliestExpirationDate: earliestDateOf(product),
-      stock: product.tracksInventory ? product.totalInventory : null,
+      stock: productStock(product),
       tracked: nodes.length > 0,
     };
     if (!nodes.every(isReadableBatch)) {
@@ -104,15 +118,7 @@ export function toDashboardRows(
       };
     }
 
-    const batches = nodes.map((node) => {
-      const expirationDate = node.expirationDate?.value ?? "";
-      return {
-        id: node.id,
-        quantity: Number(node.quantity?.value ?? 0),
-        expirationDate,
-        freshness: batchFreshnessOrNull(expirationDate, today),
-      };
-    });
+    const batches = nodes.map((node) => toDashboardBatch(node, today));
 
     const hasMoreBatches = references?.pageInfo.hasNextPage ?? false;
     return {

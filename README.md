@@ -36,6 +36,7 @@ The app runs on a development store with 60 demo food products. It isn't deploye
 | Freshness dashboard                             | Done                                                             |
 | Fulfillment and compliance webhooks             | Done: signature-verified; fulfillments deduplicated and recorded |
 | Decrementing batches when an order is fulfilled | Done: FEFO, per-product lock, retry-safe; shortfalls recorded    |
+| CSV export of batches                           | In progress: file builder done; download route and button next   |
 
 ## Features
 
@@ -93,7 +94,8 @@ A product's status is that of its worst in-stock batch, or **Not set** when it h
 - **Shortfalls are recorded, not hidden.** When fresh stock can't cover a fulfillment, the gap is saved as an `oversell` or `expired_stock_only` discrepancy, along with deleted products, lists too long to read and writes Shopify rejects. A rejection is recorded instead of retried, so it can't block the product's later fulfillments.
 - **`fulfillments/create`, not `orders/paid`.** Stock leaves on shipment, and partial fulfillments arrive as separate events. On a real partial fulfillment, the payload's `quantity` was the units shipped in that fulfillment.
 - **Minimal data access.** The scopes are `write_products`, `read_metaobjects` and `read_fulfillments`. The app requests no protected customer fields, which Shopify's docs say are then redacted from payloads, and it stores no customer data.
-- **Pure logic in `shared/`.** Freshness, FEFO, validation and grouping are pure functions with unit tests. Routes and the extension call them instead of re-implementing the rules.
+- **A CSV that opens safely in a spreadsheet.** The export starts with a UTF-8 byte order mark so Excel shows accents correctly, and puts an apostrophe before any text starting with `=`, `+`, `-` or `@`, so a product title can't run as a formula ([OWASP CSV injection](https://community.owasp.org/attacks/CSV_Injection)). It writes one row per batch and refuses an incomplete batch list rather than leave an expired batch out.
+- **Pure logic in `shared/`.** Freshness, FEFO, validation, grouping and the CSV export file are pure functions with unit tests. Routes and the extension call them instead of re-implementing the rules.
 
 ## Known limitations
 

@@ -7,6 +7,11 @@ export interface ProductInventory {
   totalInventory: number;
 }
 
+/** Shopify's stock for a product, or null when it doesn't track inventory. */
+export function productStock(product: ProductInventory): number | null {
+  return product.tracksInventory ? product.totalInventory : null;
+}
+
 export interface InventoryMismatch {
   batchTotal: number;
   inStock: number;

@@ -7,6 +7,7 @@ import {
   getInventoryMismatch,
   matchesStock,
   type ProductInventory,
+  productStock,
 } from "./inventory";
 import type { Batch } from "./freshness";
 import { MAX_QUANTITY } from "./validation";
@@ -205,5 +206,15 @@ describe("formatUnbatchedStock", () => {
     [2, "2 units in stock aren't in a batch yet."],
   ])("describes %i", (units, message) => {
     expect(formatUnbatchedStock(units)).toBe(message);
+  });
+});
+
+describe("productStock", () => {
+  it("is Shopify's stock when tracked, null when not", () => {
+    expect(productStock({ tracksInventory: true, totalInventory: 7 })).toBe(7);
+    expect(productStock({ tracksInventory: true, totalInventory: 0 })).toBe(0);
+    expect(
+      productStock({ tracksInventory: false, totalInventory: 7 }),
+    ).toBeNull();
   });
 });
