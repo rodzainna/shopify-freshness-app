@@ -120,6 +120,7 @@ Planned, not scheduled:
 - **Choose the batch on an order:** let a merchant set which batch an order's items came from, overriding the FEFO pick.
 - **Near-expiry discount:** a setting that discounts a product by a chosen percentage when its soonest unexpired in-stock batch is within a set number of days of expiry. The discount covers the whole product, since Shopify prices aren't per batch.
 - **Minimum shelf life:** a merchant-set number of days. Like expired stock, batches with that many days or fewer left are never decremented, because packing teams shouldn't ship them.
+- **Variant batches:** track batches for each variant of a product, such as a size or flavor, instead of one list for the whole product.
 
 ## Tech stack
 
