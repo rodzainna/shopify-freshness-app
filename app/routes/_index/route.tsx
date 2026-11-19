@@ -21,9 +21,10 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>Freshness Tracker</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Know which perishable stock is fresh, close to expiry or expired, and
+          have each fulfilled order use up the soonest-expiring batch first.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -39,16 +40,18 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Batches with expiry dates</strong>. Record the quantity and
+            expiration date of each batch on the product page.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>A freshness dashboard</strong>. See the status and earliest
+            expiry of every product, filter what needs attention, and export the
+            filtered list to CSV.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>First expired, first out</strong>. A fulfilled order takes
+            stock from the soonest-expiring batch, and expired batches are never
+            used.
           </li>
         </ul>
       </div>
